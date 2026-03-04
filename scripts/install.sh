@@ -71,30 +71,36 @@ if [[ ! -f "$PROJECT_SRC/manage.py" ]]; then
     info "ไม่พบ project files — จะ clone จาก GitHub"
 fi
 
-# ── Prompt for config ─────────────────────────────────────────────────────────
-read -rp "App user (default: soc): " APP_USER
+# ── Prompt for config (อ่านจาก /dev/tty เสมอ รองรับ curl | bash) ──────────────
+_read() {
+    local prompt="$1" varname="$2"
+    printf "%s" "$prompt" > /dev/tty
+    read -r "$varname" < /dev/tty
+}
+
+_read "App user (default: soc): " APP_USER
 APP_USER="${APP_USER:-soc}"
 
-read -rp "Install path (default: /home/${APP_USER}/soc-dashboard): " APP_DIR
+_read "Install path (default: /home/${APP_USER}/soc-dashboard): " APP_DIR
 APP_DIR="${APP_DIR:-/home/${APP_USER}/soc-dashboard}"
 
 DEFAULT_IP=$(hostname -I | awk '{print $1}')
-read -rp "Server IP (default: ${DEFAULT_IP}): " SERVER_IP
+_read "Server IP (default: ${DEFAULT_IP}): " SERVER_IP
 SERVER_IP="${SERVER_IP:-$DEFAULT_IP}"
 
-read -rp "Dashboard port (default: 8500): " DASHBOARD_PORT
+_read "Dashboard port (default: 8500): " DASHBOARD_PORT
 DASHBOARD_PORT="${DASHBOARD_PORT:-8500}"
 
-read -rp "Gunicorn port (default: 8002): " GUNICORN_PORT
+_read "Gunicorn port (default: 8002): " GUNICORN_PORT
 GUNICORN_PORT="${GUNICORN_PORT:-8002}"
 
-read -rp "DB name (default: soc_db): " DB_NAME
+_read "DB name (default: soc_db): " DB_NAME
 DB_NAME="${DB_NAME:-soc_db}"
 
-read -rp "DB user (default: soc_user): " DB_USER
+_read "DB user (default: soc_user): " DB_USER
 DB_USER="${DB_USER:-soc_user}"
 
-read -rp "DB password (leave blank to auto-generate): " DB_PASS
+_read "DB password (leave blank to auto-generate): " DB_PASS
 if [[ -z "$DB_PASS" ]]; then
     DB_PASS=$(openssl rand -hex 16)
     info "Generated DB password: ${DB_PASS}"
@@ -103,7 +109,7 @@ fi
 SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(50))" 2>/dev/null \
              || openssl rand -hex 50)
 
-read -rp "Install Ollama for AI analysis? [y/N]: " INSTALL_OLLAMA
+_read "Install Ollama for AI analysis? [y/N]: " INSTALL_OLLAMA
 INSTALL_OLLAMA="${INSTALL_OLLAMA:-n}"
 
 echo ""
@@ -115,7 +121,7 @@ echo "  Server IP   : ${SERVER_IP}"
 echo "  Port        : ${DASHBOARD_PORT}"
 echo "  DB          : ${DB_NAME} / ${DB_USER}"
 echo ""
-read -rp "Proceed with installation? [y/N]: " CONFIRM
+_read "Proceed with installation? [y/N]: " CONFIRM
 [[ "${CONFIRM,,}" != "y" ]] && echo "Aborted." && exit 0
 
 # =============================================================================
@@ -594,7 +600,7 @@ if [[ "${INSTALL_OLLAMA,,}" == "y" ]]; then
     fi
     systemctl enable --now ollama
 
-    read -rp "Pull Ollama model? (e.g. qwen2.5:1.5b, openchat — leave blank to skip): " OLLAMA_MODEL
+    _read "Pull Ollama model? (e.g. qwen2.5:1.5b, openchat — leave blank to skip): " OLLAMA_MODEL
     if [[ -n "$OLLAMA_MODEL" ]]; then
         ollama pull "$OLLAMA_MODEL" || warn "ollama pull failed — ลอง pull ด้วยตนเองภายหลัง"
     fi
