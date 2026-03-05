@@ -147,7 +147,6 @@ elif [[ "$OS_FAMILY" == "rhel" ]]; then
     dnf update -y -q
     dnf install -y \
         python3.11 python3.11-pip python3.11-devel \
-        postgresql-server postgresql-contrib \
         redis \
         nginx \
         git gcc \
@@ -155,6 +154,21 @@ elif [[ "$OS_FAMILY" == "rhel" ]]; then
         policycoreutils-python-utils
     REDIS_SERVICE="redis"
     PYTHON_BIN="python3.11"
+
+    # PostgreSQL 15 (default repo มีแค่ 13 ซึ่ง Django 5 ไม่รองรับ)
+    if ! command -v psql &>/dev/null || ! psql --version 2>/dev/null | grep -qE "1[456789]\."; then
+        info "ติดตั้ง PostgreSQL 15 จาก pgdg repo..."
+        dnf install -y https://download.postgresql.org/pub/repos/yum/reporpms/EL-9-x86_64/pgdg-redhat-repo-latest.noarch.rpm 2>/dev/null || true
+        dnf -qy module disable postgresql 2>/dev/null || true
+        dnf install -y postgresql15-server postgresql15-contrib
+        PG_SERVICE="postgresql-15"
+        PG_BIN="/usr/pgsql-15/bin"
+        PG_DATA="/var/lib/pgsql/15/data"
+    else
+        PG_SERVICE="postgresql"
+        PG_BIN=""
+        PG_DATA="/var/lib/pgsql/data"
+    fi
 fi
 
 ok "System packages installed"
@@ -165,9 +179,12 @@ ok "System packages installed"
 step "2. PostgreSQL"
 
 if [[ "$OS_FAMILY" == "rhel" ]]; then
-    PG_DATA="/var/lib/pgsql/data"
     if [[ ! -f "${PG_DATA}/PG_VERSION" ]]; then
-        postgresql-setup --initdb
+        if [[ -n "$PG_BIN" ]]; then
+            "${PG_BIN}/postgresql-15-setup" initdb
+        else
+            postgresql-setup --initdb
+        fi
         ok "PostgreSQL cluster initialized"
     else
         ok "PostgreSQL cluster already exists"
@@ -187,7 +204,7 @@ if [[ "$OS_FAMILY" == "rhel" ]]; then
     fi
 fi
 
-systemctl enable --now postgresql
+systemctl enable --now "${PG_SERVICE:-postgresql}"
 
 cd /tmp && sudo -u postgres psql -v ON_ERROR_STOP=0 <<SQL
 DO \$\$
@@ -361,6 +378,9 @@ fi
 # =============================================================================
 step "7. Django migrate & collectstatic"
 
+mkdir -p "${APP_DIR}/static" "${APP_DIR}/staticfiles"
+chown -R "${APP_USER}:${APP_USER}" "${APP_DIR}/static" "${APP_DIR}/staticfiles"
+
 sudo -u "$APP_USER" bash -c "
     cd '${APP_DIR}'
     venv/bin/python manage.py migrate --noinput
@@ -433,9 +453,10 @@ EOF
     rm -f /etc/nginx/conf.d/default.conf
 fi
 
-systemctl enable --now nginx
-nginx -t && systemctl reload nginx
-ok "Nginx configured on port ${DASHBOARD_PORT}"
+nginx -t || { warn "nginx config มีปัญหา — ดู: nginx -t"; }
+systemctl enable nginx
+systemctl restart nginx && ok "Nginx configured on port ${DASHBOARD_PORT}" \
+    || warn "Nginx ไม่ start — รัน: journalctl -xeu nginx.service"
 
 # =============================================================================
 # STEP 9 — Firewall
