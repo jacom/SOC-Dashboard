@@ -1,0 +1,395 @@
+{% extends "base.html" %}
+{% block title %}{{ vuln.cve_id|default:vuln.title|truncatechars:40 }} — SOC Dashboard{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb" class="mb-3">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="/">Dashboard</a></li>
+        <li class="breadcrumb-item"><a href="/vulnerabilities/">Vulnerabilities</a></li>
+        <li class="breadcrumb-item active">{{ vuln.cve_id|default:"Detail" }}</li>
+    </ol>
+</nav>
+
+<!-- Header -->
+<div class="d-flex align-items-start justify-content-between mb-4 gap-3">
+    <div>
+        <div class="d-flex align-items-center gap-2 mb-1 flex-wrap">
+            <span class="badge bg-{{ vuln.severity_color }} fs-6">{{ vuln.severity }}</span>
+            <span class="badge bg-{{ vuln.status_color }}">{{ vuln.get_status_display }}</span>
+            {% if vuln.is_overdue %}
+            <span class="badge bg-danger"><i class="bi bi-alarm me-1"></i>เกิน SLA</span>
+            {% endif %}
+            {% if vuln.cve_id %}
+            <a href="https://nvd.nist.gov/vuln/detail/{{ vuln.cve_id }}" target="_blank"
+               class="badge text-decoration-none" style="background:#1f6feb;">
+                <i class="bi bi-box-arrow-up-right me-1"></i>NVD: {{ vuln.cve_id }}
+            </a>
+            {% endif %}
+        </div>
+        <h4 class="mb-0">{{ vuln.title }}</h4>
+    </div>
+    <div class="d-flex gap-2 flex-shrink-0">
+        <button class="btn btn-outline-primary btn-sm" onclick="openEditModal({{ vuln.pk }})">
+            <i class="bi bi-pencil me-1"></i>Edit
+        </button>
+    </div>
+</div>
+
+<div class="row g-3">
+    <!-- Left column -->
+    <div class="col-lg-8">
+
+        <!-- Details Card -->
+        <div class="card mb-3">
+            <div class="card-header"><i class="bi bi-shield-exclamation me-2 text-warning"></i>รายละเอียด Vulnerability</div>
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-sm-4">
+                        <div class="text-muted" style="font-size:.75rem; text-transform:uppercase; letter-spacing:.05em;">CVE ID</div>
+                        {% if vuln.cve_id %}
+                        <code class="text-warning">{{ vuln.cve_id }}</code>
+                        {% else %}<span class="text-muted">—</span>{% endif %}
+                    </div>
+                    <div class="col-sm-4">
+                        <div class="text-muted" style="font-size:.75rem; text-transform:uppercase; letter-spacing:.05em;">Agent IP</div>
+                        <span>{{ vuln.agent_ip|default:"—" }}</span>
+                    </div>
+                    <div class="col-sm-4">
+                        <div class="text-muted" style="font-size:.75rem; text-transform:uppercase; letter-spacing:.05em;">Asset</div>
+                        {% if vuln.asset %}
+                        <a href="/assets/" class="text-info text-decoration-none">{{ vuln.asset.hostname|default:vuln.asset.agent_ip }}</a>
+                        {% else %}<span class="text-muted">—</span>{% endif %}
+                    </div>
+                    <div class="col-sm-4">
+                        <div class="text-muted" style="font-size:.75rem; text-transform:uppercase; letter-spacing:.05em;">Discovered</div>
+                        <span>{{ vuln.discovered_at|date:"d M Y" }}</span>
+                    </div>
+                    <div class="col-sm-4">
+                        <div class="text-muted" style="font-size:.75rem; text-transform:uppercase; letter-spacing:.05em;">Due Date</div>
+                        {% if vuln.due_date %}
+                        <span class="{% if vuln.is_overdue %}text-danger fw-bold{% endif %}">
+                            {% if vuln.is_overdue %}<i class="bi bi-exclamation-circle me-1"></i>{% endif %}
+                            {{ vuln.due_date|date:"d M Y" }}
+                        </span>
+                        {% else %}<span class="text-muted">—</span>{% endif %}
+                    </div>
+                    <div class="col-sm-4">
+                        <div class="text-muted" style="font-size:.75rem; text-transform:uppercase; letter-spacing:.05em;">Resolved</div>
+                        <span>{{ vuln.resolved_at|date:"d M Y"|default:"—" }}</span>
+                    </div>
+                    {% if vuln.description %}
+                    <div class="col-12">
+                        <div class="text-muted mb-1" style="font-size:.75rem; text-transform:uppercase; letter-spacing:.05em;">Description</div>
+                        <div style="font-size:.88rem; color:#c9d1d9; white-space:pre-wrap;">{{ vuln.description }}</div>
+                    </div>
+                    {% endif %}
+                    {% if vuln.remediation %}
+                    <div class="col-12">
+                        <div class="text-muted mb-1" style="font-size:.75rem; text-transform:uppercase; letter-spacing:.05em;">Remediation</div>
+                        <div style="font-size:.88rem; color:#c9d1d9; white-space:pre-wrap;">{{ vuln.remediation }}</div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- AI Analysis Card -->
+        <div class="card mb-3" style="border-color:#1f6feb;">
+            <div class="card-header d-flex justify-content-between align-items-center" style="background:#0d1f3c;">
+                <span><i class="bi bi-robot me-2" style="color:#58a6ff;"></i>AI Analysis</span>
+                <button class="btn btn-sm btn-outline-primary" onclick="openAiModal({{ vuln.pk }}, '{{ vuln.cve_id }}')">
+                    {% if vuln.ai_analysis %}<i class="bi bi-arrow-clockwise me-1"></i>วิเคราะห์ใหม่{% else %}<i class="bi bi-play-fill me-1"></i>วิเคราะห์{% endif %}
+                </button>
+            </div>
+            <div class="card-body" id="ai-body">
+                {% if vuln.ai_analysis %}{% with a=vuln.ai_analysis %}
+                <div class="row g-3 mb-3">
+                    <div class="col-sm-4">
+                        <div class="text-muted" style="font-size:.75rem; text-transform:uppercase; letter-spacing:.05em;">Risk Level</div>
+                        <span class="badge fs-6 bg-{% if a.risk_level == 'CRITICAL' %}danger{% elif a.risk_level == 'HIGH' %}warning{% elif a.risk_level == 'MEDIUM' %}info{% else %}secondary{% endif %}">{{ a.risk_level }}</span>
+                    </div>
+                    <div class="col-sm-4">
+                        <div class="text-muted" style="font-size:.75rem; text-transform:uppercase; letter-spacing:.05em;">Urgency</div>
+                        <strong class="text-{% if a.urgency == 'HIGH' %}danger{% elif a.urgency == 'MEDIUM' %}warning{% else %}secondary{% endif %}">{{ a.urgency|default:"—" }}</strong>
+                    </div>
+                    <div class="col-sm-4">
+                        <div class="text-muted" style="font-size:.75rem; text-transform:uppercase; letter-spacing:.05em;">Analyzed</div>
+                        <span class="text-muted small">{{ a.analyzed_at|date:"d M Y H:i" }}</span>
+                    </div>
+                </div>
+                {% if a.summary_th %}
+                <div class="mb-3 p-3 rounded" style="background:#0d2d16; border:1px solid #238636;">
+                    <div class="text-muted mb-1" style="font-size:.75rem; text-transform:uppercase;">สรุป (ภาษาไทย)</div>
+                    <div style="font-size:.88rem; color:#c9d1d9;">{{ a.summary_th }}</div>
+                </div>
+                {% endif %}
+                {% if a.exploitability %}
+                <div class="mb-2">
+                    <div class="text-muted mb-1" style="font-size:.75rem; text-transform:uppercase;">Exploitability</div>
+                    <div style="font-size:.88rem; color:#c9d1d9;">{{ a.exploitability }}</div>
+                </div>
+                {% endif %}
+                {% if a.remediation_th %}
+                <div class="mb-2">
+                    <div class="text-muted mb-1" style="font-size:.75rem; text-transform:uppercase;">แนวทางแก้ไข</div>
+                    <div style="font-size:.88rem; color:#c9d1d9;">{{ a.remediation_th }}</div>
+                </div>
+                {% endif %}
+                {% endwith %}{% else %}
+                <div class="text-center text-muted py-3">
+                    <i class="bi bi-robot me-1"></i>ยังไม่ได้วิเคราะห์ด้วย AI
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Linked Incidents -->
+        <div class="card mb-3">
+            <div class="card-header"><i class="bi bi-folder2-open me-2 text-info"></i>Incidents ที่เกี่ยวข้อง</div>
+            <div class="card-body p-0">
+                <table class="table table-hover mb-0" style="font-size:.83rem;">
+                    <tbody>
+                        {% for inc in linked_incidents %}
+                        <tr style="cursor:pointer;" onclick="window.location='/incidents/{{ inc.pk }}/'">
+                            <td style="width:80px;">
+                                {% if inc.status == 'New' %}<span class="badge bg-primary">New</span>
+                                {% elif inc.status == 'InProgress' %}<span class="badge bg-warning text-dark">InProgress</span>
+                                {% elif inc.status == 'Resolved' %}<span class="badge bg-success">Resolved</span>
+                                {% else %}<span class="badge bg-secondary">{{ inc.status }}</span>{% endif %}
+                            </td>
+                            <td>
+                                <strong class="text-info">{{ inc.thehive_case_id }}</strong>
+                                — {{ inc.title|truncatechars:60 }}
+                            </td>
+                            <td class="text-muted text-end" style="width:90px;">
+                                <small>{{ inc.created_at|date:"d M Y" }}</small>
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr><td class="text-center text-muted py-3">
+                            <i class="bi bi-info-circle me-1"></i>ยังไม่มี Incident ที่ link ไว้ — ไป link ได้ที่หน้า Incident Detail
+                        </td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Right column -->
+    <div class="col-lg-4">
+
+        <!-- Status card -->
+        <div class="card mb-3">
+            <div class="card-header"><i class="bi bi-activity me-2"></i>สถานะ</div>
+            <div class="card-body d-grid gap-2">
+                {% for val, label in vuln.STATUS_CHOICES %}
+                <form method="post" action="/vulnerabilities/{{ vuln.pk }}/edit/">
+                    {% csrf_token %}
+                    <input type="hidden" name="status" value="{{ val }}">
+                    <input type="hidden" name="title" value="{{ vuln.title }}">
+                    <input type="hidden" name="severity" value="{{ vuln.severity }}">
+                    <input type="hidden" name="cve_id" value="{{ vuln.cve_id }}">
+                    <input type="hidden" name="agent_ip" value="{{ vuln.agent_ip|default:'' }}">
+                    <input type="hidden" name="discovered_at" value="{{ vuln.discovered_at|date:'Y-m-d' }}">
+                    <button type="submit"
+                        class="btn w-100 btn-sm {% if vuln.status == val %}btn-{{ vuln.status_color }}{% else %}btn-outline-secondary{% endif %}">
+                        {% if vuln.status == val %}<i class="bi bi-check2 me-1"></i>{% endif %}{{ label }}
+                    </button>
+                </form>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Meta -->
+        <div class="card mb-3">
+            <div class="card-header"><i class="bi bi-info-circle me-2"></i>ข้อมูลเพิ่มเติม</div>
+            <div class="card-body" style="font-size:.83rem;">
+                <div class="mb-2">
+                    <span class="text-muted">บันทึกโดย:</span><br>
+                    {{ vuln.created_by.get_full_name|default:vuln.created_by.username|default:"—" }}
+                </div>
+                <div class="mb-2">
+                    <span class="text-muted">บันทึกเมื่อ:</span><br>
+                    {{ vuln.created_at|date:"d M Y H:i" }}
+                </div>
+                <div>
+                    <span class="text-muted">อัปเดตล่าสุด:</span><br>
+                    {{ vuln.updated_at|date:"d M Y H:i" }}
+                </div>
+            </div>
+        </div>
+
+        <!-- Quick actions -->
+        <div class="card mb-3">
+            <div class="card-header"><i class="bi bi-lightning me-2"></i>Quick Actions</div>
+            <div class="card-body d-grid gap-2">
+                {% if vuln.cve_id %}
+                <a href="https://nvd.nist.gov/vuln/detail/{{ vuln.cve_id }}" target="_blank"
+                   class="btn btn-outline-secondary btn-sm">
+                    <i class="bi bi-box-arrow-up-right me-1"></i>ดูใน NVD
+                </a>
+                {% endif %}
+                <a href="/vulnerabilities/" class="btn btn-outline-secondary btn-sm">
+                    <i class="bi bi-list me-1"></i>กลับรายการ
+                </a>
+                <button class="btn btn-outline-danger btn-sm" onclick="confirmDelete()">
+                    <i class="bi bi-trash me-1"></i>ลบ
+                </button>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<!-- Edit Modal (reuse from list) -->
+<div class="modal fade" id="vulnModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content" style="background:#161b22; border:1px solid #30363d;">
+            <div class="modal-header" style="border-bottom:1px solid #30363d;">
+                <h5 class="modal-title" id="vulnModalTitle"><i class="bi bi-pencil-square me-2 text-info"></i>Edit Vulnerability</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="vulnId">
+                <div class="row g-3">
+                    <div class="col-12"><label class="form-label small">Title *</label>
+                        <input type="text" id="fTitle" class="form-control form-control-sm"></div>
+                    <div class="col-md-6"><label class="form-label small">CVE ID</label>
+                        <input type="text" id="fCveId" class="form-control form-control-sm" placeholder="CVE-2024-XXXXX"></div>
+                    <div class="col-md-6"><label class="form-label small">Agent IP</label>
+                        <input type="text" id="fAgentIp" class="form-control form-control-sm"></div>
+                    <div class="col-md-4"><label class="form-label small">Severity</label>
+                        <select id="fSeverity" class="form-select form-select-sm">
+                            <option value="CRITICAL">Critical</option><option value="HIGH">High</option>
+                            <option value="MEDIUM">Medium</option><option value="LOW">Low</option>
+                        </select></div>
+                    <div class="col-md-4"><label class="form-label small">Status</label>
+                        <select id="fStatus" class="form-select form-select-sm">
+                            <option value="open">Open</option><option value="in_progress">In Progress</option>
+                            <option value="mitigated">Mitigated</option><option value="resolved">Resolved</option>
+                            <option value="accepted">Risk Accepted</option>
+                        </select></div>
+                    <div class="col-md-4"><label class="form-label small">Discovered</label>
+                        <input type="date" id="fDiscoveredAt" class="form-control form-control-sm"></div>
+                    <div class="col-md-6"><label class="form-label small">Due Date</label>
+                        <input type="date" id="fDueDate" class="form-control form-control-sm"></div>
+                    <div class="col-md-6"><label class="form-label small">Resolved Date</label>
+                        <input type="date" id="fResolvedAt" class="form-control form-control-sm"></div>
+                    <div class="col-12"><label class="form-label small">Description</label>
+                        <textarea id="fDescription" class="form-control form-control-sm" rows="3"></textarea></div>
+                    <div class="col-12"><label class="form-label small">Remediation</label>
+                        <textarea id="fRemediation" class="form-control form-control-sm" rows="2"></textarea></div>
+                </div>
+            </div>
+            <div class="modal-footer" style="border-top:1px solid #30363d;">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">ยกเลิก</button>
+                <button type="button" class="btn btn-primary btn-sm" onclick="saveVuln()">
+                    <i class="bi bi-save me-1"></i>บันทึก
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- AI Modal -->
+<div class="modal fade" id="aiModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content" style="background:#161b22; border:1px solid #1f6feb;">
+            <div class="modal-header" style="border-bottom:1px solid #1f6feb; background:#0d1f3c;">
+                <h5 class="modal-title"><i class="bi bi-robot me-2 text-primary"></i>AI Analysis — <span id="aiModalCve"></span></h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="aiModalBody">
+                <div class="text-center py-4"><div class="spinner-border text-primary"></div><div class="mt-2 text-muted">กำลังวิเคราะห์…</div></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Confirm Modal -->
+<div class="modal fade" id="deleteModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content" style="background:#161b22; border:1px solid #30363d;">
+            <div class="modal-header" style="border-bottom:1px solid #30363d;">
+                <h5 class="modal-title text-danger"><i class="bi bi-exclamation-triangle me-2"></i>ยืนยันการลบ</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">ลบ <strong>{{ vuln.cve_id|default:vuln.title }}</strong>? ไม่สามารถย้อนกลับได้</div>
+            <div class="modal-footer" style="border-top:1px solid #30363d;">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">ยกเลิก</button>
+                <form method="post" action="/vulnerabilities/{{ vuln.pk }}/delete/" class="m-0">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-danger btn-sm"><i class="bi bi-trash me-1"></i>ลบ</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const CSRF = () => (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '';
+
+function confirmDelete() { new bootstrap.Modal(document.getElementById('deleteModal')).show(); }
+
+function openEditModal(pk) {
+    fetch(`/vulnerabilities/${pk}/edit/`)
+        .then(r => r.json()).then(data => {
+            document.getElementById('vulnId').value = data.id;
+            document.getElementById('fTitle').value = data.title;
+            document.getElementById('fCveId').value = data.cve_id;
+            document.getElementById('fAgentIp').value = data.agent_ip;
+            document.getElementById('fSeverity').value = data.severity;
+            document.getElementById('fStatus').value = data.status;
+            document.getElementById('fDescription').value = data.description;
+            document.getElementById('fRemediation').value = data.remediation;
+            document.getElementById('fDiscoveredAt').value = data.discovered_at;
+            document.getElementById('fDueDate').value = data.due_date;
+            document.getElementById('fResolvedAt').value = data.resolved_at;
+            new bootstrap.Modal(document.getElementById('vulnModal')).show();
+        });
+}
+
+function saveVuln() {
+    const pk = document.getElementById('vulnId').value;
+    const fd = new FormData();
+    ['title','cve_id','agent_ip','severity','status','description','remediation','discovered_at','due_date','resolved_at'].forEach(f => {
+        const el = document.getElementById('f' + f.split('_').map((w,i) => i===0 ? w.charAt(0).toUpperCase()+w.slice(1) : w.charAt(0).toUpperCase()+w.slice(1)).join(''));
+        if (el) fd.append(f, el.value);
+    });
+    fetch(`/vulnerabilities/${pk}/edit/`, {method:'POST', headers:{'X-CSRFToken': CSRF()}, body: fd})
+        .then(r => r.json()).then(d => { if (d.ok) location.reload(); });
+}
+
+function openAiModal(pk, cve) {
+    document.getElementById('aiModalCve').textContent = cve || `#${pk}`;
+    document.getElementById('aiModalBody').innerHTML =
+        '<div class="text-center py-4"><div class="spinner-border text-primary"></div><div class="mt-2 text-muted">กำลังวิเคราะห์…</div></div>';
+    const modal = new bootstrap.Modal(document.getElementById('aiModal'));
+    modal.show();
+    const fd = new FormData(); fd.append('vuln_id', pk);
+    fetch('/vulnerabilities/ai-analyze/', {method:'POST', headers:{'X-CSRFToken': CSRF()}, body: fd})
+        .then(r => r.json()).then(data => {
+            if (!data.ok) { document.getElementById('aiModalBody').innerHTML = `<div class="text-danger p-3">${data.error}</div>`; return; }
+            const a = data.analysis;
+            document.getElementById('aiModalBody').innerHTML = `
+                <div class="row g-2 mb-3">
+                    <div class="col-sm-4"><div class="text-muted small text-uppercase">Risk</div>
+                        <span class="badge bg-danger fs-6">${a.risk_level}</span></div>
+                    <div class="col-sm-4"><div class="text-muted small text-uppercase">Urgency</div>
+                        <strong>${a.urgency}</strong></div>
+                    <div class="col-sm-4"><div class="text-muted small text-uppercase">Model</div>
+                        <span class="text-muted small">${data.model}</span></div>
+                </div>
+                ${a.summary_th ? '<div class="p-3 rounded mb-3" style="background:#0d2d16;border:1px solid #238636"><div class="text-muted small text-uppercase mb-1">สรุป (ไทย)</div>' + escHtml(a.summary_th) + '</div>' : ''}
+                ${a.remediation_th ? '<div class="mb-2"><div class="text-muted small text-uppercase mb-1">แนวทางแก้ไข</div>' + escHtml(a.remediation_th) + '</div>' : ''}`;
+            setTimeout(() => location.reload(), 1500);
+        });
+}
+
+function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+</script>
+{% endblock %}

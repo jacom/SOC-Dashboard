@@ -19,6 +19,17 @@
         .sidebar .nav-link:hover { background-color: #21262d; color: #c9d1d9; }
         .sidebar .nav-link.active { background-color: #1f6feb33; color: #58a6ff; }
         .sidebar .nav-link i { width: 20px; }
+        .sidebar .nav-group-label {
+            font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.1em;
+            color: #484f58; padding: 0.6rem 1rem 0.2rem; font-weight: 600;
+        }
+        .sidebar .nav-link .chevron { font-size: 0.7rem; transition: transform 0.2s; }
+        .sidebar .nav-link[aria-expanded="true"] .chevron { transform: rotate(180deg); }
+        .sidebar-submenu { border-left: 2px solid #30363d; margin-left: 1.25rem; padding-left: 0.5rem; }
+        .sidebar-submenu .nav-link { font-size: 0.82rem; padding: 0.35rem 0.75rem; color: #6e7681; }
+        .sidebar-submenu .nav-link:hover, .sidebar-submenu .nav-link.active { color: #58a6ff; }
+        .sidebar-divider { border-color: #30363d; margin: 0.4rem 1rem; }
+        .navbar-user-info { font-size: 0.82rem; color: #8b949e; }
         .main-content { background-color: #0d1117; }
         .card { background-color: #161b22; border: 1px solid #30363d; color: #c9d1d9; }
         .card-header { background-color: #21262d; border-bottom: 1px solid #30363d; }
@@ -92,12 +103,29 @@
             <span class="navbar-toggler-icon"></span>
         </button>
         <div class="collapse navbar-collapse" id="navbarNav">
-            <ul class="navbar-nav ms-auto">
+            <ul class="navbar-nav ms-auto align-items-center gap-1">
                 <li class="nav-item">
                     <span class="nav-link refresh-indicator">
                         <i class="bi bi-arrow-clockwise me-1"></i>
                         <span id="last-refresh">--</span>
                     </span>
+                </li>
+                <li class="nav-item">
+                    <span class="navbar-user-info px-2 d-flex align-items-center gap-1">
+                        <i class="bi bi-person-circle"></i>
+                        <span>{{ request.user.username }}</span>
+                        {% if user_role %}
+                        <span class="badge bg-secondary ms-1" style="font-size:0.6rem; text-transform:uppercase;">{{ user_role }}</span>
+                        {% endif %}
+                    </span>
+                </li>
+                <li class="nav-item">
+                    <form method="post" action="/logout/" class="m-0">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-sm btn-outline-secondary px-2 py-1" style="font-size:0.8rem;">
+                            <i class="bi bi-box-arrow-right me-1"></i>Logout
+                        </button>
+                    </form>
                 </li>
             </ul>
         </div>
@@ -107,18 +135,52 @@
 <div class="container-fluid">
     <div class="row">
         <!-- Sidebar -->
-        <div class="col-md-2 col-lg-2 px-0 sidebar py-3">
-            <ul class="nav flex-column">
+        <div class="col-md-2 col-lg-2 px-0 sidebar py-3 d-flex flex-column" style="min-height:calc(100vh - 56px);">
+            <ul class="nav flex-column flex-grow-1">
+
+                <!-- Dashboard -->
                 <li class="nav-item">
-                    <a class="nav-link {% if request.resolver_match.app_name == 'core' %}active{% endif %}" href="/">
+                    <a class="nav-link {% if request.resolver_match.url_name == 'index' or request.path == '/' %}active{% endif %}" href="/">
                         <i class="bi bi-speedometer2 me-2"></i>Dashboard
                     </a>
                 </li>
+
+                <!-- ── SOC Operations ── -->
+                <li class="nav-group-label mt-2">SOC Operations</li>
+
+                <!-- Alerts (Accordion) -->
                 <li class="nav-item">
-                    <a class="nav-link {% if request.resolver_match.app_name == 'alerts' %}active{% endif %}" href="/alerts/">
-                        <i class="bi bi-exclamation-triangle me-2"></i>Alerts
-                    </a>
+                    <div class="d-flex align-items-center" style="margin:2px 8px;">
+                        <a class="nav-link flex-grow-1 {% if request.resolver_match.app_name == 'alerts' %}active{% endif %}"
+                           href="/alerts/" style="margin:0; border-radius:6px 0 0 6px;">
+                            <i class="bi bi-exclamation-triangle me-2"></i>Alerts
+                        </a>
+                        <button class="btn border-0 px-2 py-2"
+                                style="background:none; color:#8b949e; border-radius:0 6px 6px 0; line-height:1;"
+                                data-bs-toggle="collapse" data-bs-target="#alertsSubmenu"
+                                aria-expanded="{% if request.resolver_match.app_name == 'alerts' %}true{% else %}false{% endif %}"
+                                id="alerts-toggle-btn">
+                            <i class="bi bi-chevron-down" style="font-size:0.7rem; transition:transform 0.2s;" id="alerts-chevron"></i>
+                        </button>
+                    </div>
+                    <div class="collapse {% if request.resolver_match.app_name == 'alerts' %}show{% endif %}" id="alertsSubmenu">
+                        <ul class="list-unstyled sidebar-submenu mt-1 mb-1">
+                            <li>
+                                <a class="nav-link {% if request.resolver_match.url_name == 'suppress_list' %}active{% endif %}"
+                                   href="/alerts/suppress/">
+                                    <i class="bi bi-bell-slash me-2"></i>Suppress Rules
+                                </a>
+                            </li>
+                            <li>
+                                <a class="nav-link {% if request.resolver_match.url_name == 'playbook_list' %}active{% endif %}"
+                                   href="/alerts/playbooks/">
+                                    <i class="bi bi-check2-square me-2"></i>Playbooks
+                                </a>
+                            </li>
+                        </ul>
+                    </div>
                 </li>
+
                 <li class="nav-item">
                     <a class="nav-link {% if request.resolver_match.app_name == 'incidents' %}active{% endif %}" href="/incidents/">
                         <i class="bi bi-folder2-open me-2"></i>Incidents
@@ -129,48 +191,96 @@
                         <i class="bi bi-bell me-2"></i>Notifications
                     </a>
                 </li>
+
+                <!-- ── Asset Management ── -->
+                <li class="nav-group-label mt-2">Asset Management</li>
+
+                <li class="nav-item">
+                    <a class="nav-link {% if request.resolver_match.app_name == 'assets' %}active{% endif %}" href="/assets/">
+                        <i class="bi bi-pc-display me-2"></i>Assets
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if request.resolver_match.app_name == 'vulnerabilities' %}active{% endif %}" href="/vulnerabilities/">
+                        <i class="bi bi-shield-exclamation me-2"></i>Vulnerabilities
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if request.resolver_match.app_name == 'sla' %}active{% endif %}" href="/sla/">
+                        <i class="bi bi-speedometer me-2"></i>SLA
+                    </a>
+                </li>
+
+                <!-- ── Reports ── -->
+                <li class="nav-group-label mt-2">Reports</li>
+
+                <li class="nav-item">
+                    <a class="nav-link {% if request.resolver_match.url_name == 'report_page' %}active{% endif %}" href="/reports/">
+                        <i class="bi bi-file-earmark-bar-graph me-2"></i>Reports
+                    </a>
+                </li>
+
+                <!-- ── Admin ── -->
+                <li class="nav-group-label mt-2">Admin</li>
+
+                {% if user_role == 'admin' %}
+                <li class="nav-item">
+                    <a class="nav-link {% if request.resolver_match.url_name == 'user_list' %}active{% endif %}" href="/users/">
+                        <i class="bi bi-people me-2"></i>Users
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if request.resolver_match.url_name == 'audit_log' %}active{% endif %}" href="/audit/">
+                        <i class="bi bi-journal-text me-2"></i>Audit Log
+                    </a>
+                </li>
+                {% endif %}
                 <li class="nav-item">
                     <a class="nav-link {% if request.resolver_match.app_name == 'config_app' %}active{% endif %}" href="/settings/">
                         <i class="bi bi-sliders me-2"></i>Settings
                     </a>
                 </li>
-                <li class="nav-item mt-3">
-                    <hr style="border-color: #30363d; margin: 0 16px;">
-                </li>
-                <li class="nav-item mt-2">
-                    <a class="nav-link" href="/admin/" target="_blank">
-                        <i class="bi bi-gear me-2"></i>Admin
+                <li class="nav-item">
+                    <a class="nav-link {% if 'wazuh-check' in request.path %}active{% endif %}" href="/settings/wazuh-check/">
+                        <i class="bi bi-tools me-2"></i>Wazuh Config Check
                     </a>
                 </li>
-                <li class="nav-item mt-3"><hr style="border-color:#30363d;margin:0 16px;"></li>
                 <li class="nav-item">
-                    <div class="px-3 py-2 d-flex align-items-center justify-content-between">
-                        <span class="small text-muted">
-                            <i class="bi bi-person-circle me-1"></i>{{ request.user.username }}
-                        </span>
-                        <form method="post" action="/logout/" class="m-0">
-                            {% csrf_token %}
-                            <button type="submit" class="btn btn-sm btn-outline-secondary px-2 py-0"
-                                    title="Logout" style="font-size:0.75rem;">
-                                <i class="bi bi-box-arrow-right"></i>
-                            </button>
-                        </form>
-                    </div>
+                    <a class="nav-link" href="/admin/" target="_blank">
+                        <i class="bi bi-gear me-2"></i>Django Admin
+                    </a>
                 </li>
                 <li class="nav-item">
-                    <div class="px-3 pb-2 text-center">
-                        <span style="font-size:0.7rem; color:#484f58;">v{{ APP_VERSION }}</span>
-                        <span id="update-badge" style="display:none;">
-                            <br>
-                            <button id="update-btn" class="btn btn-xs mt-1 px-2 py-0"
-                                    style="font-size:0.7rem; background:#1f6feb33; border:1px solid #1f6feb; color:#58a6ff;"
-                                    onclick="showUpdateModal()">
-                                <i class="bi bi-arrow-up-circle me-1"></i><span id="update-label">Update available</span>
-                            </button>
-                        </span>
-                    </div>
+                    <a class="nav-link {% if '/2fa/' in request.path %}active{% endif %}" href="/2fa/setup/">
+                        <i class="bi bi-shield-lock me-2"></i>ตั้งค่า 2FA
+                    </a>
                 </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if '/license/' in request.path %}active{% endif %}" href="/license/">
+                        <i class="bi bi-key me-2"></i>License
+                        {% if request.license_status.warn %}
+                        <span class="badge bg-danger ms-1" style="font-size:0.6rem;">!</span>
+                        {% elif request.license_status.status == 'valid' %}
+                        <span class="badge bg-success ms-1" style="font-size:0.6rem;">✓</span>
+                        {% endif %}
+                    </a>
+                </li>
+
             </ul>
+
+            <!-- Version (pinned bottom) -->
+            <div class="px-3 pb-2 mt-2 text-center">
+                <hr class="sidebar-divider">
+                <span style="font-size:0.7rem; color:#484f58;">v{{ APP_VERSION }}</span>
+                <span id="update-badge" style="display:none;">
+                    <br>
+                    <button id="update-btn" class="btn btn-xs mt-1 px-2 py-0"
+                            style="font-size:0.7rem; background:#1f6feb33; border:1px solid #1f6feb; color:#58a6ff;"
+                            onclick="showUpdateModal()">
+                        <i class="bi bi-arrow-up-circle me-1"></i><span id="update-label">Update available</span>
+                    </button>
+                </span>
+            </div>
         </div>
 
         <!-- Main content -->
@@ -183,7 +293,39 @@
                 </div>
                 {% endfor %}
             {% endif %}
+
+            {# ── License warning banner ── #}
+            {% if request.license_status.warn %}
+            <div class="alert alert-dismissible fade show mb-3 py-2"
+                 style="{% if request.license_status.status == 'none' and request.license_status.grace_ok %}background:#2d2a1e; border-color:#d29922; color:#e3b341;{% else %}background:#3d1717; border-color:#da3633; color:#ff7b72;{% endif %} font-size:0.83rem;">
+                {% if request.license_status.status == 'none' and request.license_status.grace_ok %}
+                    <i class="bi bi-hourglass-split me-1"></i>
+                    ยังไม่มี License Key — Grace period เหลืออีก <strong>{{ request.license_status.grace_days_left }} วัน</strong>
+                {% elif request.license_status.status == 'expired' %}
+                    <i class="bi bi-x-circle me-1"></i>
+                    License หมดอายุแล้ว ({{ request.license_status.expires_at|date:"d M Y" }})
+                {% elif request.license_status.status == 'invalid' %}
+                    <i class="bi bi-exclamation-triangle me-1"></i>
+                    License Key ไม่ถูกต้อง
+                {% else %}
+                    <i class="bi bi-exclamation-circle me-1"></i>
+                    License ไม่ถูกต้อง — กรุณาติดต่อ vendor
+                {% endif %}
+                {% if user.profile.is_admin %}
+                <a href="/license/" class="ms-2" style="color:inherit; font-weight:600;">ใส่ License Key →</a>
+                {% endif %}
+                <button type="button" class="btn-close btn-close-white py-2" data-bs-dismiss="alert" style="filter:brightness(0.7);"></button>
+            </div>
+            {% endif %}
+
             {% block content %}{% endblock %}
+
+            <!-- Footer -->
+            <footer class="mt-5 pt-3" style="border-top: 1px solid #21262d;">
+                <p class="text-center mb-0" style="font-size: 0.72rem; color: #484f58;">
+                    &copy; 2026 โรงพยาบาลวานรนิวาส SOC Dashboard. All rights reserved.
+                </p>
+            </footer>
         </div>
     </div>
 </div>
@@ -205,6 +347,18 @@ setInterval(updateRefreshTime, 1000);
 // Chart.js dark defaults
 Chart.defaults.color = '#8b949e';
 Chart.defaults.borderColor = '#30363d';
+
+// Alerts accordion chevron rotation
+document.addEventListener('DOMContentLoaded', function() {
+    const alertsMenu = document.getElementById('alertsSubmenu');
+    const chevron    = document.getElementById('alerts-chevron');
+    if (alertsMenu && chevron) {
+        alertsMenu.addEventListener('show.bs.collapse',  () => chevron.style.transform = 'rotate(180deg)');
+        alertsMenu.addEventListener('hide.bs.collapse',  () => chevron.style.transform = 'rotate(0deg)');
+        // Init state
+        if (alertsMenu.classList.contains('show')) chevron.style.transform = 'rotate(180deg)';
+    }
+});
 </script>
 
 {% block extra_scripts %}{% endblock %}

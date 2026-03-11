@@ -1,0 +1,461 @@
+{% extends 'base.html' %}
+
+{% block title %}Playbooks — SOC Dashboard{% endblock %}
+
+{% block extra_head %}
+<style>
+    .step-preview { font-size: 0.78rem; color: #8b949e; line-height: 1.6; }
+    .step-preview li { padding: 0.1rem 0; }
+    .rule-tag { display: inline-block; background: #21262d; border: 1px solid #30363d;
+                color: #79c0ff; font-family: monospace; font-size: 0.75rem;
+                padding: 0.15em 0.5em; border-radius: 4px; margin: 1px; }
+    .group-tag { display: inline-block; background: #21262d; border: 1px solid #30363d;
+                 color: #a5d6ff; font-size: 0.75rem; padding: 0.15em 0.5em;
+                 border-radius: 4px; margin: 1px; }
+    .sev-tag { display: inline-block; font-size: 0.68rem; font-weight: 700;
+               padding: 0.15em 0.5em; border-radius: 3px; margin: 1px; text-transform: uppercase; }
+    .sev-CRITICAL { background: #da3633; color: #fff; }
+    .sev-HIGH     { background: #d29922; color: #0d1117; }
+    .sev-MEDIUM   { background: #1f6feb; color: #fff; }
+    .sev-LOW      { background: #238636; color: #fff; }
+    .pb-row-steps { max-height: 0; overflow: hidden; transition: max-height .25s ease; }
+    .pb-row-steps.open { max-height: 400px; }
+    .stat-mini { font-size: 0.78rem; }
+    .progress-xs { height: 4px; background: #21262d; border-radius: 2px; }
+    .progress-xs .bar { height: 4px; border-radius: 2px; background: #238636; transition: width .3s; }
+</style>
+{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb" class="mb-3">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="/">Dashboard</a></li>
+        <li class="breadcrumb-item"><a href="/alerts/">Alerts</a></li>
+        <li class="breadcrumb-item active">Playbooks</li>
+    </ol>
+</nav>
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h4 class="mb-0"><i class="bi bi-check2-square me-2 text-info"></i>Response Playbooks</h4>
+        <p class="text-muted small mb-0 mt-1">Template การตอบสนอง — match อัตโนมัติกับ Alert</p>
+    </div>
+    <button class="btn btn-sm btn-primary" onclick="openAddModal()">
+        <i class="bi bi-plus-circle me-1"></i>เพิ่ม Playbook
+    </button>
+</div>
+
+{% if playbooks %}
+<!-- Summary bar -->
+<div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
+        <div class="card p-3">
+            <div class="text-muted" style="font-size:0.75rem; text-transform:uppercase; letter-spacing:.05em;">Total</div>
+            <div style="font-size:1.8rem; font-weight:700; color:#58a6ff;">{{ playbooks|length }}</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card p-3">
+            <div class="text-muted" style="font-size:0.75rem; text-transform:uppercase; letter-spacing:.05em;">Active</div>
+            <div style="font-size:1.8rem; font-weight:700; color:#3fb950;">
+                {% with cnt=0 %}{% for pb in playbooks %}{% if pb.is_active %}{% with cnt=cnt|add:1 %}{% endwith %}{% endif %}{% endfor %}
+                {{ playbooks|length }}{% endwith %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<div class="card">
+    <div class="card-body p-0">
+        {% if playbooks %}
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr>
+                    <th style="width:24px;"></th>
+                    <th>Playbook</th>
+                    <th>Match Rules</th>
+                    <th>Severity</th>
+                    <th>Steps</th>
+                    <th>Triggered</th>
+                    <th>Avg Complete</th>
+                    <th>Status</th>
+                    <th style="width:100px;"></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for pb in playbooks %}
+                <!-- Main row -->
+                <tr style="cursor:pointer;" onclick="toggleSteps('{{ pb.pk }}')" title="คลิกเพื่อดู steps">
+                    <td class="text-center" style="width:24px;">
+                        <i class="bi bi-chevron-right text-muted" id="chevron-{{ pb.pk }}"
+                           style="font-size:0.7rem; transition:transform .2s;"></i>
+                    </td>
+                    <td>
+                        <div class="fw-semibold" style="color:#c9d1d9;">{{ pb.name }}</div>
+                        {% if pb.description %}
+                        <div class="text-muted" style="font-size:0.78rem;">{{ pb.description|truncatechars:70 }}</div>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% for rid in pb.rule_ids_list %}
+                            <span class="rule-tag">{{ rid }}</span>
+                        {% endfor %}
+                        {% for grp in pb.rule_groups_list %}
+                            <span class="group-tag">{{ grp }}</span>
+                        {% endfor %}
+                        {% if not pb.rule_ids_list and not pb.rule_groups_list %}
+                            <span class="text-muted small">—</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% for sev in pb.severity_list %}
+                            <span class="sev-tag sev-{{ sev }}">{{ sev }}</span>
+                        {% empty %}
+                            <span class="text-muted small">All</span>
+                        {% endfor %}
+                    </td>
+                    <td>
+                        <span class="badge" style="background:#1f6feb; min-width:32px;">
+                            {{ pb.steps|length }}
+                        </span>
+                    </td>
+                    <td class="stat-mini">
+                        {% if pb.runs_count %}
+                            <span style="color:#c9d1d9;">{{ pb.runs_count }}</span>
+                            <span class="text-muted"> ครั้ง</span>
+                            {% if pb.completed_runs %}
+                            <br><span style="color:#3fb950; font-size:0.72rem;">
+                                {{ pb.completed_runs }} เสร็จสมบูรณ์
+                            </span>
+                            {% endif %}
+                        {% else %}
+                            <span class="text-muted">—</span>
+                        {% endif %}
+                    </td>
+                    <td style="min-width:90px;">
+                        {% if pb.runs_count %}
+                        <div class="d-flex align-items-center gap-2">
+                            <div class="progress-xs flex-grow-1">
+                                <div class="bar" style="width:{{ pb.avg_pct }}%;
+                                     background:{% if pb.avg_pct >= 80 %}#238636{% elif pb.avg_pct >= 40 %}#d29922{% else %}#da3633{% endif %};"></div>
+                            </div>
+                            <span class="stat-mini" style="color:{% if pb.avg_pct >= 80 %}#3fb950{% elif pb.avg_pct >= 40 %}#d29922{% else %}#ff7b72{% endif %};">
+                                {{ pb.avg_pct }}%
+                            </span>
+                        </div>
+                        {% else %}
+                        <span class="text-muted small">—</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if pb.is_active %}
+                            <span class="badge bg-success">Active</span>
+                        {% else %}
+                            <span class="badge bg-secondary">Inactive</span>
+                        {% endif %}
+                    </td>
+                    <td onclick="event.stopPropagation();">
+                        <div class="d-flex gap-1">
+                            <button class="btn btn-sm btn-outline-primary py-0 px-2"
+                                    onclick="openEditModal({{ pb.pk }})" title="แก้ไข">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger py-0 px-2"
+                                    onclick="deletePlaybook({{ pb.pk }}, '{{ pb.name|escapejs }}')" title="ลบ">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+                <!-- Steps expand row -->
+                <tr id="steps-row-{{ pb.pk }}" style="display:none;">
+                    <td colspan="9" style="padding:0; border-top:none;">
+                        <div class="px-4 py-3" style="background:#0d1117; border-top:1px solid #21262d;">
+                            <div class="row g-3">
+                                <div class="col-md-8">
+                                    <div class="text-muted mb-2" style="font-size:0.72rem; text-transform:uppercase; letter-spacing:.06em;">
+                                        <i class="bi bi-list-check me-1"></i>Steps ({{ pb.steps|length }})
+                                    </div>
+                                    <ol class="step-preview mb-0 ps-3">
+                                        {% for step in pb.steps %}
+                                        <li>{{ step }}</li>
+                                        {% empty %}
+                                        <li class="text-muted">ยังไม่มี steps</li>
+                                        {% endfor %}
+                                    </ol>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="text-muted mb-2" style="font-size:0.72rem; text-transform:uppercase; letter-spacing:.06em;">
+                                        <i class="bi bi-info-circle me-1"></i>Match Criteria
+                                    </div>
+                                    <div style="font-size:0.8rem; color:#8b949e;">
+                                        {% if pb.rule_ids_list %}
+                                        <div class="mb-1"><span class="text-muted">Rule IDs:</span>
+                                            {% for r in pb.rule_ids_list %}<span class="rule-tag">{{ r }}</span>{% endfor %}
+                                        </div>
+                                        {% endif %}
+                                        {% if pb.rule_groups_list %}
+                                        <div class="mb-1"><span class="text-muted">Groups:</span>
+                                            {% for g in pb.rule_groups_list %}<span class="group-tag">{{ g }}</span>{% endfor %}
+                                        </div>
+                                        {% endif %}
+                                        {% if pb.severity_list %}
+                                        <div class="mb-1"><span class="text-muted">Severity:</span>
+                                            {% for s in pb.severity_list %}<span class="sev-tag sev-{{ s }}">{{ s }}</span>{% endfor %}
+                                        </div>
+                                        {% else %}
+                                        <div class="mb-1"><span class="text-muted">Severity:</span> <span style="color:#c9d1d9;">All</span></div>
+                                        {% endif %}
+                                        <div><span class="text-muted">Updated:</span> {{ pb.updated_at|date:"Y-m-d H:i" }}</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="text-center py-5 text-muted">
+            <i class="bi bi-check2-square d-block mb-2" style="font-size:3rem; opacity:.3;"></i>
+            <div>ยังไม่มี Playbook</div>
+            <button class="btn btn-sm btn-primary mt-3" onclick="openAddModal()">
+                <i class="bi bi-plus-circle me-1"></i>สร้าง Playbook แรก
+            </button>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Add/Edit Modal -->
+<div class="modal fade" id="pbModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content" style="background:#161b22; border-color:#30363d;">
+            <div class="modal-header" style="border-color:#30363d;">
+                <h5 class="modal-title" id="pbModalLabel">Playbook</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="pb-id">
+                <div class="mb-3">
+                    <label class="form-label">Name <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="pb-name"
+                           placeholder="e.g. Brute Force Login Response">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Description</label>
+                    <textarea class="form-control" id="pb-description" rows="2"
+                              placeholder="คำอธิบาย Playbook นี้"></textarea>
+                </div>
+
+                <div class="row g-3 mb-3">
+                    <div class="col-md-6">
+                        <label class="form-label">Rule IDs
+                            <small class="text-muted">(comma-separated)</small>
+                        </label>
+                        <input type="text" class="form-control" id="pb-rule-ids"
+                               placeholder="e.g. 92058,92059">
+                        <div class="form-text">Match alert เมื่อ rule_id ตรงกัน</div>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Rule Groups
+                            <small class="text-muted">(comma-separated)</small>
+                        </label>
+                        <input type="text" class="form-control" id="pb-rule-groups"
+                               placeholder="e.g. authentication_failed,web">
+                        <div class="form-text">Match alert เมื่อ rule group ตรงกัน</div>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">Severity Filter
+                        <small class="text-muted">(เว้นว่าง = ทุก severity)</small>
+                    </label>
+                    <div class="d-flex gap-3 flex-wrap mt-1">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="sev-critical" value="CRITICAL">
+                            <label class="form-check-label text-danger fw-semibold" for="sev-critical">CRITICAL</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="sev-high" value="HIGH">
+                            <label class="form-check-label text-warning fw-semibold" for="sev-high">HIGH</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="sev-medium" value="MEDIUM">
+                            <label class="form-check-label text-info fw-semibold" for="sev-medium">MEDIUM</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="sev-low" value="LOW">
+                            <label class="form-check-label fw-semibold" style="color:#3fb950;" for="sev-low">LOW</label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <label class="form-label mb-0">Steps <small class="text-muted">(หนึ่งขั้นตอนต่อบรรทัด)</small></label>
+                        <small class="text-muted" id="step-count-hint"></small>
+                    </div>
+                    <textarea class="form-control" id="pb-steps" rows="9"
+                              placeholder="ตรวจสอบ src_ip ว่าน่าสงสัยหรือไม่&#10;ตรวจสอบ agent log ย้อนหลัง 1 ชั่วโมง&#10;Block IP ที่ Firewall&#10;บันทึก Incident ใน TheHive&#10;แจ้งทีม SOC"
+                              style="font-family: monospace; font-size:.88rem;"
+                              oninput="updateStepCount(this)"></textarea>
+                </div>
+
+                <div class="form-check form-switch mb-3">
+                    <input class="form-check-input" type="checkbox" id="pb-is-active" checked>
+                    <label class="form-check-label" for="pb-is-active">Active (ใช้งาน)</label>
+                </div>
+
+                <div id="pb-save-error" class="alert alert-danger d-none py-2" role="alert"
+                     style="background:#3d1717; border-color:#da3633; color:#ff7b72;"></div>
+            </div>
+            <div class="modal-footer" style="border-color:#30363d;">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">ยกเลิก</button>
+                <button type="button" class="btn btn-primary btn-sm" onclick="savePlaybook()">
+                    <i class="bi bi-floppy me-1"></i>บันทึก
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const _csrf = () => (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '';
+let _pbModal = null;
+function _modal() {
+    if (!_pbModal) _pbModal = new bootstrap.Modal(document.getElementById('pbModal'));
+    return _pbModal;
+}
+
+/* ── Step count hint ── */
+function updateStepCount(textarea) {
+    const lines = textarea.value.split('\n').filter(l => l.trim()).length;
+    document.getElementById('step-count-hint').textContent = lines ? `${lines} ขั้นตอน` : '';
+}
+
+/* ── Expand/collapse steps ── */
+function toggleSteps(pk) {
+    const row     = document.getElementById(`steps-row-${pk}`);
+    const chevron = document.getElementById(`chevron-${pk}`);
+    const open    = row.style.display === 'none' || row.style.display === '';
+    row.style.display     = open ? '' : 'none';
+    chevron.style.transform = open ? 'rotate(90deg)' : 'rotate(0deg)';
+}
+
+/* ── Add modal ── */
+function openAddModal() {
+    document.getElementById('pb-id').value = '';
+    document.getElementById('pb-name').value = '';
+    document.getElementById('pb-description').value = '';
+    document.getElementById('pb-rule-ids').value = '';
+    document.getElementById('pb-rule-groups').value = '';
+    document.getElementById('pb-steps').value = '';
+    document.getElementById('pb-is-active').checked = true;
+    document.getElementById('pb-save-error').classList.add('d-none');
+    document.getElementById('step-count-hint').textContent = '';
+    ['sev-critical','sev-high','sev-medium','sev-low'].forEach(id =>
+        document.getElementById(id).checked = false
+    );
+    document.getElementById('pbModalLabel').textContent = 'เพิ่ม Playbook';
+    _modal().show();
+}
+
+/* ── Edit modal ── */
+async function openEditModal(pk) {
+    document.getElementById('pb-save-error').classList.add('d-none');
+    try {
+        const resp = await fetch(`/alerts/playbooks/${pk}/`);
+        const data = await resp.json();
+        if (!data.ok) { alert('ไม่สามารถโหลด Playbook ได้'); return; }
+
+        document.getElementById('pb-id').value            = data.id;
+        document.getElementById('pb-name').value          = data.name;
+        document.getElementById('pb-description').value   = data.description || '';
+        document.getElementById('pb-rule-ids').value      = data.rule_ids || '';
+        document.getElementById('pb-rule-groups').value   = data.rule_groups || '';
+        document.getElementById('pb-steps').value         = (data.steps || []).join('\n');
+        document.getElementById('pb-is-active').checked   = data.is_active;
+
+        const sevActive = (data.severity_filter || '').split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+        document.getElementById('sev-critical').checked = sevActive.includes('CRITICAL');
+        document.getElementById('sev-high').checked     = sevActive.includes('HIGH');
+        document.getElementById('sev-medium').checked   = sevActive.includes('MEDIUM');
+        document.getElementById('sev-low').checked      = sevActive.includes('LOW');
+
+        const stepsText = document.getElementById('pb-steps').value;
+        updateStepCount({value: stepsText});
+
+        document.getElementById('pbModalLabel').textContent = `แก้ไข: ${data.name}`;
+        _modal().show();
+    } catch(e) {
+        alert('Network error: ' + e.message);
+    }
+}
+
+/* ── Save ── */
+async function savePlaybook() {
+    const errEl = document.getElementById('pb-save-error');
+    errEl.classList.add('d-none');
+
+    const sevChecked = ['sev-critical','sev-high','sev-medium','sev-low']
+        .filter(id => document.getElementById(id).checked)
+        .map(id => document.getElementById(id).value);
+
+    const payload = {
+        id:              document.getElementById('pb-id').value || null,
+        name:            document.getElementById('pb-name').value.trim(),
+        description:     document.getElementById('pb-description').value.trim(),
+        rule_ids:        document.getElementById('pb-rule-ids').value.trim(),
+        rule_groups:     document.getElementById('pb-rule-groups').value.trim(),
+        severity_filter: sevChecked.join(','),
+        steps:           document.getElementById('pb-steps').value,
+        is_active:       document.getElementById('pb-is-active').checked,
+    };
+
+    if (!payload.name) {
+        errEl.textContent = 'กรุณาใส่ชื่อ Playbook';
+        errEl.classList.remove('d-none');
+        return;
+    }
+
+    try {
+        const resp = await fetch('/alerts/playbooks/save/', {
+            method: 'POST',
+            headers: {'X-CSRFToken': _csrf(), 'Content-Type': 'application/json'},
+            body: JSON.stringify(payload),
+        });
+        const data = await resp.json();
+        if (data.ok) {
+            _modal().hide();
+            location.reload();
+        } else {
+            errEl.textContent = data.error || 'เกิดข้อผิดพลาด';
+            errEl.classList.remove('d-none');
+        }
+    } catch(e) {
+        errEl.textContent = 'Network error: ' + e.message;
+        errEl.classList.remove('d-none');
+    }
+}
+
+/* ── Delete ── */
+async function deletePlaybook(pk, name) {
+    if (!confirm(`ลบ Playbook "${name}"?\n\nประวัติ run ทั้งหมดจะถูกลบด้วย`)) return;
+    try {
+        const resp = await fetch(`/alerts/playbooks/${pk}/delete/`, {
+            method: 'POST', headers: {'X-CSRFToken': _csrf()},
+        });
+        const data = await resp.json();
+        if (data.ok) { location.reload(); }
+        else { alert('ลบไม่สำเร็จ: ' + (data.error || '')); }
+    } catch(e) {
+        alert('Network error: ' + e.message);
+    }
+}
+</script>
+{% endblock %}

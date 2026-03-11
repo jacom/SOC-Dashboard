@@ -1,0 +1,407 @@
+{% extends 'base.html' %}
+
+{% block title %}Reports — SOC Dashboard{% endblock %}
+
+{% block content %}
+<!-- Breadcrumb -->
+<nav aria-label="breadcrumb" class="mb-3">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="/">Dashboard</a></li>
+        <li class="breadcrumb-item active">Reports</li>
+    </ol>
+</nav>
+
+<!-- Page Header -->
+<div class="d-flex align-items-center mb-4">
+    <i class="bi bi-file-earmark-bar-graph me-3" style="font-size:1.8rem; color:#58a6ff;"></i>
+    <div>
+        <h4 class="mb-0 fw-bold">Security Reports</h4>
+        <p class="text-muted mb-0" style="font-size:0.85rem;">Generate PDF or Excel reports for a selected date range</p>
+    </div>
+</div>
+
+<!-- Date Range Card -->
+<div class="card mb-4">
+    <div class="card-header d-flex align-items-center gap-2">
+        <i class="bi bi-calendar-range text-info"></i>
+        <span class="fw-semibold">Date Range</span>
+    </div>
+    <div class="card-body">
+        <div class="row g-3 align-items-end">
+            <div class="col-sm-4 col-md-3">
+                <label class="form-label small text-muted mb-1">From</label>
+                <input type="date" id="date_from" class="form-control" value="{{ default_from }}" onchange="updateDownloadLinks()">
+            </div>
+            <div class="col-sm-4 col-md-3">
+                <label class="form-label small text-muted mb-1">To</label>
+                <input type="date" id="date_to" class="form-control" value="{{ default_to }}" onchange="updateDownloadLinks()">
+            </div>
+            <div class="col-sm-4 col-md-3">
+                <label class="form-label small text-muted mb-1">Quick Select</label>
+                <div class="d-flex gap-2 flex-wrap">
+                    <button class="btn btn-sm btn-outline-secondary" onclick="setRange(7)">7 วัน</button>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="setRange(30)">30 วัน</button>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="setThisMonth()">เดือนนี้</button>
+                </div>
+            </div>
+        </div>
+
+        <hr style="border-color:#30363d;">
+
+        <!-- Action Buttons -->
+        <div class="d-flex flex-wrap gap-2">
+            <button class="btn btn-primary" onclick="loadPreview()">
+                <i class="bi bi-eye me-2"></i>Preview
+            </button>
+            <a id="btn-excel" href="#" class="btn btn-success" download>
+                <i class="bi bi-file-earmark-excel me-2"></i>Download Excel
+            </a>
+            <a id="btn-pdf" href="#" class="btn btn-danger" download>
+                <i class="bi bi-file-earmark-pdf me-2"></i>Download PDF
+            </a>
+        </div>
+    </div>
+</div>
+
+<!-- Spinner -->
+<div id="preview-spinner" class="text-center py-5" style="display:none;">
+    <div class="spinner-border text-info" role="status" style="width:2.5rem; height:2.5rem;">
+        <span class="visually-hidden">Loading...</span>
+    </div>
+    <p class="text-muted mt-2 mb-0">Loading report data...</p>
+</div>
+
+<!-- Preview Section -->
+<div id="preview-section" style="display:none;">
+
+    <!-- KPI Cards Row -->
+    <div class="row g-3 mb-4">
+        <div class="col-6 col-md-4 col-lg-2-4">
+            <div class="card stat-card total h-100">
+                <div class="card-body py-3">
+                    <div class="stat-label">Total Alerts</div>
+                    <div class="stat-number text-info" id="kpi-total">—</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-md-4 col-lg-2-4">
+            <div class="card stat-card critical h-100">
+                <div class="card-body py-3">
+                    <div class="stat-label">Critical</div>
+                    <div class="stat-number" style="color:#da3633;" id="kpi-critical">—</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-md-4 col-lg-2-4">
+            <div class="card stat-card high h-100">
+                <div class="card-body py-3">
+                    <div class="stat-label">High</div>
+                    <div class="stat-number" style="color:#d29922;" id="kpi-high">—</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-md-4 col-lg-2-4">
+            <div class="card h-100" style="border-left:4px solid #136e6e;">
+                <div class="card-body py-3">
+                    <div class="stat-label">Incidents</div>
+                    <div class="stat-number" style="color:#3fb950;" id="kpi-incidents">—</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-md-4 col-lg-2-4">
+            <div class="card h-100" style="border-left:4px solid #8957e5;">
+                <div class="card-body py-3">
+                    <div class="stat-label">AI Coverage</div>
+                    <div class="stat-number" style="color:#8957e5;" id="kpi-ai">—</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Incident Summary Row -->
+    <div class="row g-3 mb-4">
+        <div class="col-md-6">
+            <div class="card h-100">
+                <div class="card-header d-flex align-items-center gap-2">
+                    <i class="bi bi-folder2-open text-success"></i>
+                    <span class="fw-semibold">Incident Summary</span>
+                </div>
+                <div class="card-body p-0">
+                    <table class="table table-hover mb-0">
+                        <tbody>
+                            <tr>
+                                <td class="text-muted">Total (period)</td>
+                                <td class="fw-bold" id="inc-total">—</td>
+                            </tr>
+                            <tr>
+                                <td class="text-muted">Open / In Progress</td>
+                                <td class="fw-bold text-warning" id="inc-open">—</td>
+                            </tr>
+                            <tr>
+                                <td class="text-muted">Resolved</td>
+                                <td class="fw-bold text-success" id="inc-resolved">—</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card h-100">
+                <div class="card-header d-flex align-items-center gap-2">
+                    <i class="bi bi-robot text-info"></i>
+                    <span class="fw-semibold">Alert Severity Breakdown</span>
+                </div>
+                <div class="card-body p-0">
+                    <table class="table table-hover mb-0">
+                        <tbody id="sev-breakdown">
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Top Rules Table -->
+    <div class="card mb-4">
+        <div class="card-header d-flex align-items-center gap-2">
+            <i class="bi bi-list-ul" style="color:#238636;"></i>
+            <span class="fw-semibold">Top Alert Rules</span>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Rule ID</th>
+                            <th>Description</th>
+                            <th class="text-end">Count</th>
+                        </tr>
+                    </thead>
+                    <tbody id="rules-tbody">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Top Agents Table -->
+    <div class="card mb-4">
+        <div class="card-header d-flex align-items-center gap-2">
+            <i class="bi bi-pc-display" style="color:#f0883e;"></i>
+            <span class="fw-semibold">Top Attacked Agents</span>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Agent Name</th>
+                            <th>Agent IP</th>
+                            <th class="text-end">Count</th>
+                        </tr>
+                    </thead>
+                    <tbody id="agents-tbody">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- MITRE ATT&CK Table -->
+    <div class="card mb-4" id="mitre-card" style="display:none;">
+        <div class="card-header d-flex align-items-center gap-2">
+            <i class="bi bi-diagram-3" style="color:#8957e5;"></i>
+            <span class="fw-semibold">MITRE ATT&CK Techniques</span>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Technique ID</th>
+                            <th class="text-end">Count</th>
+                        </tr>
+                    </thead>
+                    <tbody id="mitre-tbody">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Report Meta -->
+    <p class="text-muted small text-end mb-0">
+        Generated at: <span id="generated-at">—</span>
+    </p>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// Initialize download links on page load
+document.addEventListener('DOMContentLoaded', function() {
+    updateDownloadLinks();
+});
+
+function getDateFrom() { return document.getElementById('date_from').value; }
+function getDateTo()   { return document.getElementById('date_to').value; }
+
+function updateDownloadLinks() {
+    const from = getDateFrom();
+    const to   = getDateTo();
+    document.getElementById('btn-excel').href = `/reports/excel/?date_from=${from}&date_to=${to}`;
+    document.getElementById('btn-pdf').href   = `/reports/pdf/?date_from=${from}&date_to=${to}`;
+}
+
+function setRange(days) {
+    const to   = new Date();
+    const from = new Date();
+    from.setDate(to.getDate() - (days - 1));
+    document.getElementById('date_to').value   = formatDate(to);
+    document.getElementById('date_from').value = formatDate(from);
+    updateDownloadLinks();
+}
+
+function setThisMonth() {
+    const now   = new Date();
+    const from  = new Date(now.getFullYear(), now.getMonth(), 1);
+    const to    = now;
+    document.getElementById('date_from').value = formatDate(from);
+    document.getElementById('date_to').value   = formatDate(to);
+    updateDownloadLinks();
+}
+
+function formatDate(d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+}
+
+function loadPreview() {
+    const from = getDateFrom();
+    const to   = getDateTo();
+    if (!from || !to) { alert('Please select a valid date range.'); return; }
+
+    document.getElementById('preview-section').style.display = 'none';
+    document.getElementById('preview-spinner').style.display = 'block';
+
+    fetch(`/reports/preview/?date_from=${from}&date_to=${to}`)
+        .then(r => {
+            if (!r.ok) throw new Error('Server error: ' + r.status);
+            return r.json();
+        })
+        .then(data => {
+            renderPreview(data);
+            document.getElementById('preview-spinner').style.display = 'none';
+            document.getElementById('preview-section').style.display = 'block';
+        })
+        .catch(err => {
+            document.getElementById('preview-spinner').style.display = 'none';
+            alert('Failed to load preview: ' + err.message);
+        });
+}
+
+function renderPreview(data) {
+    // KPI cards
+    document.getElementById('kpi-total').textContent    = data.total.toLocaleString();
+    document.getElementById('kpi-critical').textContent = data.sev_counts.CRITICAL.toLocaleString();
+    document.getElementById('kpi-high').textContent     = data.sev_counts.HIGH.toLocaleString();
+    document.getElementById('kpi-incidents').textContent = data.incidents_new.toLocaleString();
+    document.getElementById('kpi-ai').textContent       = data.coverage_pct + '%';
+
+    // Incident summary
+    document.getElementById('inc-total').textContent    = data.incidents_new.toLocaleString();
+    document.getElementById('inc-open').textContent     = data.incidents_open.toLocaleString();
+    document.getElementById('inc-resolved').textContent = data.incidents_resolved.toLocaleString();
+
+    // Severity breakdown
+    const sevColors = {
+        CRITICAL: '#da3633', HIGH: '#d29922',
+        MEDIUM: '#1f6feb', LOW: '#238636', INFO: '#6e7681'
+    };
+    const sevTbody = document.getElementById('sev-breakdown');
+    sevTbody.innerHTML = '';
+    ['CRITICAL','HIGH','MEDIUM','LOW','INFO'].forEach(sev => {
+        const cnt = data.sev_counts[sev] || 0;
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td><span class="badge" style="background:${sevColors[sev]}; font-size:0.75rem;">${sev}</span></td>
+            <td class="fw-bold">${cnt.toLocaleString()}</td>
+        `;
+        sevTbody.appendChild(row);
+    });
+
+    // Top Rules
+    const rulesTbody = document.getElementById('rules-tbody');
+    rulesTbody.innerHTML = '';
+    if (data.top_rules && data.top_rules.length > 0) {
+        data.top_rules.forEach((r, i) => {
+            const desc = r.rule_description || '—';
+            const truncated = desc.length > 60 ? desc.substring(0, 60) + '...' : desc;
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td class="text-muted">${i + 1}</td>
+                <td><code style="color:#79b8ff; font-size:0.8rem;">${escapeHtml(String(r.rule_id || ''))}</code></td>
+                <td style="font-size:0.85rem;" title="${escapeHtml(desc)}">${escapeHtml(truncated)}</td>
+                <td class="text-end"><span class="badge bg-secondary">${r.count.toLocaleString()}</span></td>
+            `;
+            rulesTbody.appendChild(row);
+        });
+    } else {
+        rulesTbody.innerHTML = '<tr><td colspan="4" class="text-muted text-center py-3">No data</td></tr>';
+    }
+
+    // Top Agents
+    const agentsTbody = document.getElementById('agents-tbody');
+    agentsTbody.innerHTML = '';
+    if (data.top_agents && data.top_agents.length > 0) {
+        data.top_agents.forEach((a, i) => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td class="text-muted">${i + 1}</td>
+                <td>${escapeHtml(a.agent_name || '—')}</td>
+                <td><code style="color:#79b8ff; font-size:0.8rem;">${escapeHtml(a.agent_ip || '—')}</code></td>
+                <td class="text-end"><span class="badge bg-secondary">${a.count.toLocaleString()}</span></td>
+            `;
+            agentsTbody.appendChild(row);
+        });
+    } else {
+        agentsTbody.innerHTML = '<tr><td colspan="4" class="text-muted text-center py-3">No data</td></tr>';
+    }
+
+    // MITRE
+    const mitreTbody = document.getElementById('mitre-tbody');
+    mitreTbody.innerHTML = '';
+    if (data.mitre && data.mitre.length > 0) {
+        document.getElementById('mitre-card').style.display = '';
+        data.mitre.forEach((m, i) => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td class="text-muted">${i + 1}</td>
+                <td><span class="badge" style="background:#8957e5; font-size:0.8rem;">${escapeHtml(m.mitre_id)}</span></td>
+                <td class="text-end"><span class="badge bg-secondary">${m.count.toLocaleString()}</span></td>
+            `;
+            mitreTbody.appendChild(row);
+        });
+    } else {
+        document.getElementById('mitre-card').style.display = 'none';
+    }
+
+    // Meta
+    document.getElementById('generated-at').textContent = data.generated_at;
+}
+
+function escapeHtml(str) {
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+</script>
+{% endblock %}

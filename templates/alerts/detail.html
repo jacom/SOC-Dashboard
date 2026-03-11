@@ -144,10 +144,94 @@
                 {% endif %}
             </div>
         </div>
+
+        <!-- Playbook Checklist -->
+        <div class="card mb-3" id="playbook-section" style="display:none;">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-check2-square me-2" style="color:#58a6ff;"></i>Response Playbooks
+                    <small class="text-muted ms-2" id="pb-match-count"></small>
+                </span>
+                <a href="/alerts/playbooks/" class="btn btn-sm btn-outline-secondary" style="font-size:0.75rem;">
+                    <i class="bi bi-list-ul me-1"></i>จัดการ Playbooks
+                </a>
+            </div>
+            <div class="card-body p-0" id="pb-container">
+                <!-- filled by JS -->
+            </div>
+        </div>
     </div>
 
     <!-- Right Column -->
     <div class="col-lg-5">
+        <!-- Asset Info Card (loaded via JS) -->
+        {% if alert.agent_ip %}
+        <div id="asset-card" class="card mb-3" style="display:none; border-color:#1f6feb;">
+            <div class="card-header d-flex justify-content-between align-items-center" style="background:#0d1b2e; border-color:#1f6feb;">
+                <span><i class="bi bi-pc-display me-2" style="color:#58a6ff;"></i>Asset Info
+                    <span id="asset-criticality-badge" class="badge ms-2" style="font-size:0.7rem;"></span>
+                </span>
+                <a id="asset-detail-link" href="#" class="btn btn-sm btn-outline-primary" style="font-size:0.75rem;">
+                    <i class="bi bi-eye me-1"></i>ดูรายละเอียด
+                </a>
+            </div>
+            <div class="card-body" style="font-size:0.85rem;">
+                <div class="row g-2">
+                    <div class="col-6">
+                        <div class="text-muted" style="font-size:0.75rem;">Agent Name</div>
+                        <div id="ai-agent-name" style="color:#c9d1d9;">—</div>
+                    </div>
+                    <div class="col-6">
+                        <div class="text-muted" style="font-size:0.75rem;">Hostname</div>
+                        <div id="ai-hostname" style="color:#c9d1d9;">—</div>
+                    </div>
+                    <div class="col-6">
+                        <div class="text-muted" style="font-size:0.75rem;">ผู้ดูแล</div>
+                        <div id="ai-owner" style="color:#c9d1d9;">—</div>
+                    </div>
+                    <div class="col-6">
+                        <div class="text-muted" style="font-size:0.75rem;">แผนก</div>
+                        <div id="ai-department" style="color:#c9d1d9;">—</div>
+                    </div>
+                    <div class="col-6">
+                        <div class="text-muted" style="font-size:0.75rem;">ประเภท</div>
+                        <div id="ai-type" style="color:#c9d1d9;">—</div>
+                    </div>
+                    <div class="col-6">
+                        <div class="text-muted" style="font-size:0.75rem;">Location</div>
+                        <div id="ai-location" style="color:#c9d1d9;">—</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div id="asset-register-btn-wrap" class="mb-3" style="display:none;">
+            <button class="btn btn-sm btn-outline-secondary w-100"
+                    onclick="window.location='/assets/?q={{ alert.agent_ip }}'">
+                <i class="bi bi-plus-circle me-1"></i>ลงทะเบียน Asset {{ alert.agent_ip }}
+            </button>
+        </div>
+        {% endif %}
+
+        {% if alert.src_ip or alert.agent_ip %}
+        <div class="card mb-3" id="ti-card" style="border-color:#30363d;">
+            <div class="card-header d-flex justify-content-between align-items-center" style="border-color:#30363d;">
+                <span><i class="bi bi-shield-exclamation me-2" style="color:#f0883e;"></i>Threat Intelligence
+                    <small class="text-muted ms-1" id="ti-ip-label"></small>
+                </span>
+                <div class="d-flex gap-1">
+                    <button class="btn btn-sm btn-outline-warning" id="ti-check-btn" onclick="checkThreatIntel(false)">
+                        <i class="bi bi-search me-1"></i>Check IP
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary" id="ti-recheck-btn" onclick="checkThreatIntel(true)" style="display:none;" title="Force re-check">
+                        <i class="bi bi-arrow-clockwise"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="card-body" id="ti-body" style="font-size:.85rem; display:none;">
+                <div id="ti-results"></div>
+            </div>
+        </div>
+        {% endif %}
+
         <!-- AI Analysis -->
         {% if alert.ai_analysis %}
         {% with ai=alert.ai_analysis %}
@@ -585,6 +669,87 @@ function copyAiPayload(btn) {
     });
 }
 
+// Asset lookup
+{% if alert.agent_ip %}
+(async function loadAsset() {
+    const resp = await fetch('/assets/lookup/?ip={{ alert.agent_ip }}');
+    const data = await resp.json();
+    if (data.found) {
+        document.getElementById('asset-card').style.display = '';
+        document.getElementById('asset-register-btn-wrap').style.display = 'none';
+        document.getElementById('ai-agent-name').textContent = data.agent_name || '—';
+        document.getElementById('ai-hostname').textContent   = data.hostname || '—';
+        document.getElementById('ai-owner').textContent      = data.owner || '—';
+        document.getElementById('ai-department').textContent = data.department || '—';
+        document.getElementById('ai-type').textContent       = data.asset_type || '—';
+        document.getElementById('ai-location').textContent   = data.location || '—';
+        const badge = document.getElementById('asset-criticality-badge');
+        badge.textContent = data.criticality;
+        badge.className = `badge bg-${data.criticality_color} ms-2`;
+        document.getElementById('asset-detail-link').href = `/assets/${data.id}/`;
+    } else {
+        document.getElementById('asset-card').style.display = 'none';
+        document.getElementById('asset-register-btn-wrap').style.display = '';
+    }
+})();
+{% endif %}
+
+async function checkThreatIntel(force) {
+    const btn = document.getElementById('ti-check-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Checking...';
+
+    const url = `/alerts/{{ alert.pk }}/threat-intel/${force ? '?force=1' : ''}`;
+    try {
+        const resp = await fetch(url);
+        const data = await resp.json();
+        const body = document.getElementById('ti-body');
+        const resultsEl = document.getElementById('ti-results');
+        const recheckBtn = document.getElementById('ti-recheck-btn');
+        body.style.display = '';
+        recheckBtn.style.display = '';
+        document.getElementById('ti-ip-label').textContent = `(${data.ip})`;
+
+        if (!data.ok) {
+            resultsEl.innerHTML = `<span class="text-danger">${data.error}</span>`;
+            return;
+        }
+
+        let html = '<div class="row g-2">';
+        for (const r of data.results) {
+            const isMalicious = r.is_malicious;
+            const borderColor = isMalicious ? '#da3633' : (r.score > 0 ? '#d29922' : '#238636');
+            const badgeClass  = isMalicious ? 'bg-danger' : (r.score > 0 ? 'bg-warning text-dark' : 'bg-success');
+            const icon        = isMalicious ? 'bi-shield-x' : 'bi-shield-check';
+            const providerLabel = r.provider === 'abuseipdb' ? 'AbuseIPDB' : 'VirusTotal';
+            const scoreLabel    = r.provider === 'abuseipdb' ? `${r.score}% abuse` : `${r.score} engines`;
+
+            html += `
+            <div class="col-12">
+                <div class="p-2 rounded" style="background:#0d1117; border:1px solid ${borderColor};">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span><i class="bi ${icon} me-1"></i><strong>${providerLabel}</strong></span>
+                        <span class="badge ${badgeClass}">${isMalicious ? 'MALICIOUS' : (r.score > 0 ? 'SUSPICIOUS' : 'CLEAN')} &mdash; ${scoreLabel}</span>
+                    </div>
+                    <div class="mt-1 text-muted small">
+                        ${r.country ? `<i class="bi bi-geo-alt me-1"></i>${r.country}` : ''}
+                        ${r.isp ? `&nbsp;·&nbsp;<i class="bi bi-building me-1"></i>${r.isp}` : ''}
+                        ${r.domain ? `&nbsp;·&nbsp;<i class="bi bi-globe me-1"></i>${r.domain}` : ''}
+                    </div>
+                    <div class="mt-1" style="font-size:.75rem; color:#484f58;">checked: ${r.checked_at}</div>
+                </div>
+            </div>`;
+        }
+        html += '</div>';
+        resultsEl.innerHTML = html;
+    } catch(e) {
+        document.getElementById('ti-results').innerHTML = '<span class="text-danger">Request failed</span>';
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-search me-1"></i>Check IP';
+    }
+}
+
 function toggleRaw() {
     const section = document.getElementById('raw-data-section');
     const icon = document.getElementById('raw-toggle-icon');
@@ -602,5 +767,108 @@ function toggleRaw() {
         icon.className = 'bi bi-eye';
     }
 }
+
+/* ── Playbook Checklist ─────────────────────────────────────────── */
+async function loadPlaybooks() {
+    const resp = await fetch('/alerts/{{ alert.pk }}/playbooks/');
+    const data = await resp.json();
+    if (!data.ok || !data.playbooks.length) return;
+
+    const section = document.getElementById('playbook-section');
+    const container = document.getElementById('pb-container');
+    document.getElementById('pb-match-count').textContent = `(${data.playbooks.length} รายการ)`;
+    section.style.display = '';
+
+    let html = '';
+    for (const pb of data.playbooks) {
+        const total = pb.steps.length;
+        const done  = pb.completed_steps.length;
+        const pct   = total ? Math.round(done/total*100) : 0;
+        const pbColor = pct === 100 ? '#238636' : (pct > 0 ? '#d29922' : '#30363d');
+
+        html += `
+        <div class="p-3 border-bottom" style="border-color:#30363d !important;" id="pb-${pb.id}">
+            <div class="d-flex justify-content-between align-items-start mb-2">
+                <div>
+                    <strong style="font-size:.9rem;">${pb.name}</strong>
+                    ${pb.description ? `<div class="text-muted small">${pb.description}</div>` : ''}
+                </div>
+                <span class="badge" style="background:${pbColor}; min-width:50px;">${done}/${total}</span>
+            </div>
+            <div class="progress mb-2" style="height:4px; background:#21262d;">
+                <div class="progress-bar" style="width:${pct}%; background:${pbColor};" id="pb-bar-${pb.id}"></div>
+            </div>
+            <div id="pb-steps-${pb.id}">`;
+
+        pb.steps.forEach((step, i) => {
+            const checked = pb.completed_steps.includes(i) ? 'checked' : '';
+            html += `
+                <div class="form-check mb-1">
+                    <input class="form-check-input" type="checkbox" id="pb-step-${pb.id}-${i}" ${checked}
+                           onchange="toggleStep(${pb.id}, ${i}, this.checked)">
+                    <label class="form-check-label small" for="pb-step-${pb.id}-${i}"
+                           style="${checked ? 'text-decoration:line-through; color:#484f58;' : 'color:#c9d1d9;'}">
+                        ${i+1}. ${step}
+                    </label>
+                </div>`;
+        });
+
+        html += `</div>
+            <div class="mt-2">
+                <textarea class="form-control form-control-sm" id="pb-notes-${pb.id}" rows="2"
+                    placeholder="หมายเหตุ / บันทึกการดำเนินการ..."
+                    style="background:#0d1117; border-color:#30363d; color:#c9d1d9; font-size:.82rem;">${pb.notes || ''}</textarea>
+                <button class="btn btn-sm btn-outline-primary mt-1" onclick="savePlaybookRun(${pb.id})">
+                    <i class="bi bi-floppy me-1"></i>บันทึก
+                </button>
+            </div>
+        </div>`;
+    }
+    container.innerHTML = html;
+
+    // Store playbook data for use in toggle
+    window._pbData = {};
+    data.playbooks.forEach(pb => { window._pbData[pb.id] = pb; });
+}
+
+async function toggleStep(pbId, stepIdx, checked) {
+    const pb = window._pbData[pbId];
+    if (!pb) return;
+    let completed = [...pb.completed_steps];
+    if (checked && !completed.includes(stepIdx)) completed.push(stepIdx);
+    if (!checked) completed = completed.filter(i => i !== stepIdx);
+    pb.completed_steps = completed;
+
+    // Update label style
+    const label = document.querySelector(`label[for="pb-step-${pbId}-${stepIdx}"]`);
+    if (label) label.style.cssText = checked ? 'text-decoration:line-through; color:#484f58;' : 'color:#c9d1d9;';
+
+    // Update progress
+    const total = pb.steps.length;
+    const done  = completed.length;
+    const pct   = total ? Math.round(done/total*100) : 0;
+    const color = pct === 100 ? '#238636' : (pct > 0 ? '#d29922' : '#30363d');
+    const bar   = document.getElementById(`pb-bar-${pbId}`);
+    if (bar) { bar.style.width = pct+'%'; bar.style.background = color; }
+    const badge = document.querySelector(`#pb-${pbId} .badge`);
+    if (badge) { badge.textContent = `${done}/${total}`; badge.style.background = color; }
+
+    // Auto-save step state
+    await savePlaybookRun(pbId, true);
+}
+
+async function savePlaybookRun(pbId, silent) {
+    const pb = window._pbData[pbId];
+    if (!pb) return;
+    const notes = document.getElementById(`pb-notes-${pbId}`)?.value || '';
+    const csrfToken = (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '';
+    await fetch(`/alerts/{{ alert.pk }}/playbooks/${pbId}/run/`, {
+        method: 'POST',
+        headers: {'X-CSRFToken': csrfToken, 'Content-Type': 'application/json'},
+        body: JSON.stringify({completed_steps: pb.completed_steps, notes}),
+    });
+}
+
+loadPlaybooks();
 </script>
 {% endblock %}

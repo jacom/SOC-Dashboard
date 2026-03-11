@@ -1,0 +1,71 @@
+version: "3.9"
+
+# =============================================================================
+# SOC Dashboard — Docker Compose Stack
+# วิธีใช้:
+#   1. cp .env.example .env
+#   2. แก้ไขค่าใน .env ให้เหมาะกับสภาพแวดล้อม
+#   3. docker compose up -d
+#   4. docker compose exec app python manage.py createsuperuser
+# =============================================================================
+
+services:
+
+  # ── PostgreSQL ─────────────────────────────────────────────────────────────
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-soc_db}
+      POSTGRES_USER: ${DB_USER:-soc_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-soc_user} -d ${DB_NAME:-soc_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis ──────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── SOC Dashboard App ──────────────────────────────────────────────────────
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-soc_user}:${DB_PASSWORD}@db:5432/${DB_NAME:-soc_db}
+      REDIS_URL: redis://redis:6379/1
+    volumes:
+      - media_data:/app/media
+      - staticfiles:/app/staticfiles
+    ports:
+      - "${DASHBOARD_PORT:-8500}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/login/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  postgres_data:
+  redis_data:
+  media_data:
+  staticfiles:

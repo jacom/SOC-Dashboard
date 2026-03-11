@@ -18,6 +18,11 @@ class Incident(models.Model):
     severity = models.CharField(max_length=20, blank=True)
     thehive_url = models.URLField()
     approved_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='approved_incidents')
+    vulnerabilities = models.ManyToManyField(
+        'vulnerabilities.Vulnerability',
+        blank=True,
+        related_name='incidents',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

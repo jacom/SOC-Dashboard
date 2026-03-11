@@ -1,0 +1,538 @@
+{% extends 'base.html' %}
+{% block title %}Wazuh Vulnerabilities{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb" class="mb-3">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="/" style="color:#58a6ff;">Dashboard</a></li>
+        <li class="breadcrumb-item"><a href="{% url 'vulnerabilities:list' %}" style="color:#58a6ff;">Vulnerabilities</a></li>
+        <li class="breadcrumb-item active" style="color:#8b949e;">Wazuh Live</li>
+    </ol>
+</nav>
+
+<div class="d-flex align-items-center justify-content-between mb-3">
+    <h4 class="mb-0">
+        <i class="bi bi-shield-exclamation me-2" style="color:#da3633;"></i>Wazuh Vulnerabilities
+        <span class="badge bg-secondary ms-2" style="font-size:0.7rem;">Live</span>
+    </h4>
+    <div class="d-flex gap-2 align-items-center">
+        <button id="btn-batch" class="btn btn-sm btn-success d-none" onclick="openBatchModal()">
+            <i class="bi bi-plus-circle me-1"></i>บันทึกที่เลือก (<span id="sel-count">0</span>)
+        </button>
+        <a href="{% url 'vulnerabilities:list' %}" class="btn btn-sm btn-outline-secondary">
+            <i class="bi bi-list-ul me-1"></i>Manual Register
+        </a>
+    </div>
+</div>
+
+{% if error %}
+<div class="alert" style="background:#3d1717; border:1px solid #da3633; color:#ff7b72;">
+    <i class="bi bi-exclamation-triangle me-2"></i>ไม่สามารถเชื่อมต่อ Wazuh Indexer: {{ error }}
+</div>
+{% else %}
+
+<!-- Summary Cards -->
+<div class="row g-3 mb-3">
+    <div class="col-6 col-md-3">
+        <div class="card stat-card critical">
+            <div class="card-body py-2 text-center">
+                <div class="stat-label">Critical</div>
+                <div class="stat-number" style="color:#da3633;">{{ sev_counts.Critical|default:0 }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card stat-card high">
+            <div class="card-body py-2 text-center">
+                <div class="stat-label">High</div>
+                <div class="stat-number" style="color:#d29922;">{{ sev_counts.High|default:0 }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card stat-card medium">
+            <div class="card-body py-2 text-center">
+                <div class="stat-label">Medium</div>
+                <div class="stat-number" style="color:#1f6feb;">{{ sev_counts.Medium|default:0 }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card">
+            <div class="card-body py-2 text-center">
+                <div class="stat-label">Low</div>
+                <div class="stat-number" style="color:#8b949e;">{{ sev_counts.Low|default:0 }}</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Filters -->
+<form method="get" class="card mb-3">
+    <div class="card-body py-2">
+        <div class="row g-2 align-items-end">
+            <div class="col-md-3">
+                <label class="form-label small text-muted mb-1">Severity</label>
+                <select name="severity" class="form-select form-select-sm">
+                    <option value="">ทั้งหมด</option>
+                    <option value="Critical" {% if severity_filter == "Critical" %}selected{% endif %}>Critical</option>
+                    <option value="High"     {% if severity_filter == "High"     %}selected{% endif %}>High</option>
+                    <option value="Medium"   {% if severity_filter == "Medium"   %}selected{% endif %}>Medium</option>
+                    <option value="Low"      {% if severity_filter == "Low"      %}selected{% endif %}>Low</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small text-muted mb-1">Agent</label>
+                <select name="agent" class="form-select form-select-sm">
+                    <option value="">ทั้งหมด</option>
+                    {% for ag in agent_list %}
+                    <option value="{{ ag }}" {% if agent_filter == ag %}selected{% endif %}>{{ ag }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label small text-muted mb-1">ค้นหา CVE / Package</label>
+                <input type="text" name="q" class="form-control form-control-sm"
+                       value="{{ q }}" placeholder="CVE-2024-xxxx หรือชื่อ package">
+            </div>
+            <div class="col-md-2">
+                <button type="submit" class="btn btn-primary btn-sm w-100">
+                    <i class="bi bi-search me-1"></i>ค้นหา
+                </button>
+            </div>
+        </div>
+    </div>
+</form>
+
+<!-- Result info -->
+<div class="d-flex justify-content-between align-items-center mb-2">
+    <small class="text-muted">
+        พบ <strong style="color:#c9d1d9;">{{ total_hits }}</strong> รายการ
+        {% if severity_filter or agent_filter or q %}<span class="badge bg-secondary ms-1">filtered</span>{% endif %}
+        &nbsp;·&nbsp; <span id="sel-info" class="text-muted"></span>
+    </small>
+    <small class="text-muted">หน้า {{ page }} / {{ total_pages }}</small>
+</div>
+
+<!-- Table -->
+<div class="card">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0" style="font-size:0.82rem;">
+                <thead>
+                    <tr>
+                        <th style="width:36px;">
+                            <input type="checkbox" id="chk-all" class="form-check-input" onchange="toggleAll(this)">
+                        </th>
+                        <th style="width:90px;">Severity</th>
+                        <th style="width:60px;">Score</th>
+                        <th style="width:140px;">CVE ID</th>
+                        <th>Package</th>
+                        <th style="width:130px;">Agent</th>
+                        <th>OS</th>
+                        <th>Description</th>
+                        <th style="width:95px;">Detected</th>
+                        <th style="width:110px;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for v in vulns %}
+                    {% with imported=v.cve_id|default:"" %}
+                    <tr id="row-{{ forloop.counter }}"
+                        {% if v.imported_key in imported_pairs %}style="opacity:0.45;"{% endif %}>
+                        <td>
+                            {% if v.imported_key not in imported_pairs %}
+                            <input type="checkbox" class="form-check-input row-chk" onchange="updateSelection()"
+                                data-cve="{{ v.cve_id|escapejs }}"
+                                data-title="{{ v.title|escapejs }}"
+                                data-sev="{{ v.sev_upper|escapejs }}"
+                                data-ip="{{ v.agent_ip|escapejs }}"
+                                data-desc="{{ v.description_full|escapejs }}"
+                                data-detected="{{ v.detected_at|escapejs }}">
+                            {% endif %}
+                        </td>
+                        <td><span class="badge bg-{{ v.sev_color }}">{{ v.severity }}</span></td>
+                        <td>
+                            {% if v.score %}
+                            <span class="fw-bold {% if v.score >= 9.0 %}text-danger{% elif v.score >= 7.0 %}text-warning{% elif v.score >= 4.0 %}text-info{% else %}text-muted{% endif %}">
+                                {{ v.score }}
+                            </span>
+                            {% else %}<span class="text-muted">—</span>{% endif %}
+                        </td>
+                        <td>
+                            {% if v.cve_id %}
+                            <a href="{{ v.reference }}" target="_blank" rel="noopener"
+                               style="color:#79c0ff; font-family:monospace; font-size:0.8rem;">
+                                {{ v.cve_id }}
+                            </a>
+                            {% else %}<span class="text-muted">—</span>{% endif %}
+                        </td>
+                        <td class="text-muted" style="font-size:0.8rem;">{{ v.package|default:"—" }}</td>
+                        <td>
+                            <span class="badge" style="background:#1f6feb22; color:#58a6ff; border:1px solid #1f6feb44; font-weight:400;">
+                                {{ v.agent_name|default:"—" }}
+                            </span>
+                        </td>
+                        <td class="text-muted" style="font-size:0.78rem;">{{ v.os|truncatechars:28|default:"—" }}</td>
+                        <td class="text-muted">{{ v.description|truncatechars:90 }}</td>
+                        <td class="text-muted" style="white-space:nowrap; font-size:0.78rem;">{{ v.detected_at }}</td>
+                        <td>
+                            <div class="d-flex gap-1">
+                            {% if v.imported_key in imported_pairs %}
+                            <span class="badge bg-success align-self-center" style="font-size:0.65rem;">
+                                <i class="bi bi-check-circle me-1"></i>นำเข้าแล้ว
+                            </span>
+                            {% else %}
+                            <button class="btn btn-sm btn-outline-success" title="บันทึกเข้า Register"
+                                style="font-size:0.75rem; padding:2px 7px;"
+                                onclick="openSingleModal(
+                                    '{{ v.cve_id|escapejs }}',
+                                    '{{ v.title|escapejs }}',
+                                    '{{ v.sev_upper|escapejs }}',
+                                    '{{ v.agent_ip|escapejs }}',
+                                    '{{ v.description_full|escapejs }}',
+                                    '{{ v.detected_at|escapejs }}',
+                                    {{ forloop.counter }}
+                                )">
+                                <i class="bi bi-plus-circle"></i>
+                            </button>
+                            {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% endwith %}
+                    {% empty %}
+                    <tr><td colspan="10" class="text-center text-muted py-5">ไม่พบข้อมูล</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Pagination -->
+{% if total_pages > 1 %}
+<nav class="mt-3">
+    <ul class="pagination pagination-sm justify-content-center flex-wrap">
+        <li class="page-item {% if page <= 1 %}disabled{% endif %}">
+            <a class="page-link" href="?page={{ page|add:"-1" }}&severity={{ severity_filter }}&agent={{ agent_filter }}&q={{ q }}">
+                <i class="bi bi-chevron-left"></i>
+            </a>
+        </li>
+        {% for p in page_range %}
+        {% if p == -1 %}
+        <li class="page-item disabled"><span class="page-link">…</span></li>
+        {% elif p == page %}
+        <li class="page-item active"><span class="page-link">{{ p }}</span></li>
+        {% else %}
+        <li class="page-item">
+            <a class="page-link" href="?page={{ p }}&severity={{ severity_filter }}&agent={{ agent_filter }}&q={{ q }}">{{ p }}</a>
+        </li>
+        {% endif %}
+        {% endfor %}
+        <li class="page-item {% if page >= total_pages %}disabled{% endif %}">
+            <a class="page-link" href="?page={{ page|add:"1" }}&severity={{ severity_filter }}&agent={{ agent_filter }}&q={{ q }}">
+                <i class="bi bi-chevron-right"></i>
+            </a>
+        </li>
+    </ul>
+</nav>
+{% endif %}
+
+{% endif %}
+
+<!-- Embedded vuln data for JS -->
+<script id="vuln-data" type="application/json">
+[{% for v in vulns %}{"cve_id":"{{ v.cve_id|escapejs }}","severity":"{{ v.severity|escapejs }}","sev_upper":"{{ v.sev_upper|escapejs }}","score":"{{ v.score|escapejs }}","score_ver":"{{ v.score_ver|escapejs }}","published_at":"{{ v.published_at|escapejs }}","detected_at":"{{ v.detected_at|escapejs }}","scanner_source":"{{ v.scanner_source|escapejs }}","scanner_cond":"{{ v.scanner_cond|escapejs }}","agent_name":"{{ v.agent_name|escapejs }}","agent_ip":"{{ v.agent_ip|escapejs }}","os":"{{ v.os|escapejs }}","os_kernel":"{{ v.os_kernel|escapejs }}","pkg_name":"{{ v.pkg_name|escapejs }}","pkg_ver":"{{ v.pkg_ver|escapejs }}","pkg_arch":"{{ v.pkg_arch|escapejs }}","pkg_type":"{{ v.pkg_type|escapejs }}","pkg_installed":"{{ v.pkg_installed|escapejs }}","description_full":"{{ v.description_full|escapejs }}","title":"{{ v.title|escapejs }}"}{% if not forloop.last %},{% endif %}{% endfor %}]
+</script>
+
+<!-- Single Register Modal -->
+<div class="modal fade" id="singleModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content" style="background:#161b22; border:1px solid #30363d;">
+            <div class="modal-header" style="border-bottom:1px solid #30363d;">
+                <h5 class="modal-title"><i class="bi bi-plus-circle me-2 text-success"></i>บันทึกเข้า Register</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="single-alert" class="d-none alert mb-3"></div>
+                <div class="row g-3">
+                    <div class="col-12">
+                        <label class="form-label small text-muted">Title <span class="text-danger">*</span></label>
+                        <input type="text" id="s-title" class="form-control form-control-sm">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label small text-muted">CVE ID</label>
+                        <input type="text" id="s-cve" class="form-control form-control-sm" readonly style="opacity:.7;">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small text-muted">Severity</label>
+                        <select id="s-severity" class="form-select form-select-sm">
+                            <option value="CRITICAL">CRITICAL</option>
+                            <option value="HIGH">HIGH</option>
+                            <option value="MEDIUM">MEDIUM</option>
+                            <option value="LOW">LOW</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small text-muted">Status</label>
+                        <select id="s-status" class="form-select form-select-sm">
+                            <option value="open">Open</option>
+                            <option value="in_progress">In Progress</option>
+                            <option value="mitigated">Mitigated</option>
+                            <option value="resolved">Resolved</option>
+                            <option value="accepted">Risk Accepted</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label small text-muted">Agent IP</label>
+                        <input type="text" id="s-ip" class="form-control form-control-sm" placeholder="x.x.x.x">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small text-muted">Discovered At <span class="text-danger">*</span></label>
+                        <input type="date" id="s-discovered" class="form-control form-control-sm">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small text-muted">Due Date</label>
+                        <input type="date" id="s-due" class="form-control form-control-sm">
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label small text-muted">Description</label>
+                        <textarea id="s-desc" class="form-control form-control-sm" rows="3"></textarea>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label small text-muted">Remediation</label>
+                        <textarea id="s-remediation" class="form-control form-control-sm" rows="2" placeholder="แนวทางแก้ไข เช่น อัพเดท package เป็น version x.x.x"></textarea>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer" style="border-top:1px solid #30363d;">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">ยกเลิก</button>
+                <button type="button" class="btn btn-success btn-sm" id="s-save-btn" onclick="saveSingle()">
+                    <i class="bi bi-check-circle me-1"></i>บันทึก
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Batch Register Modal -->
+<div class="modal fade" id="batchModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content" style="background:#161b22; border:1px solid #30363d;">
+            <div class="modal-header" style="border-bottom:1px solid #30363d;">
+                <h5 class="modal-title"><i class="bi bi-plus-circle me-2 text-success"></i>บันทึกที่เลือก (<span id="batch-count">0</span> รายการ)</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="batch-alert" class="d-none alert mb-3"></div>
+                <p class="text-muted small mb-3">ตั้งค่าด้านล่างจะใช้กับ <strong>ทุกรายการที่เลือก</strong> (ยกเว้น Title และ CVE ID ที่แต่ละแถวจะใช้ของตัวเอง)</p>
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label class="form-label small text-muted">Status</label>
+                        <select id="b-status" class="form-select form-select-sm">
+                            <option value="open">Open</option>
+                            <option value="in_progress">In Progress</option>
+                            <option value="mitigated">Mitigated</option>
+                            <option value="resolved">Resolved</option>
+                            <option value="accepted">Risk Accepted</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small text-muted">Discovered At <span class="text-danger">*</span></label>
+                        <input type="date" id="b-discovered" class="form-control form-control-sm">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small text-muted">Due Date</label>
+                        <input type="date" id="b-due" class="form-control form-control-sm">
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label small text-muted">Remediation</label>
+                        <textarea id="b-remediation" class="form-control form-control-sm" rows="2" placeholder="แนวทางแก้ไข (ใช้กับทุกรายการ)"></textarea>
+                    </div>
+                </div>
+                <!-- Preview list -->
+                <div class="mt-3">
+                    <p class="small text-muted mb-1">รายการที่เลือก:</p>
+                    <div id="batch-preview" style="max-height:180px; overflow-y:auto; font-size:0.8rem;"></div>
+                </div>
+            </div>
+            <div class="modal-footer" style="border-top:1px solid #30363d;">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">ยกเลิก</button>
+                <button type="button" class="btn btn-success btn-sm" id="b-save-btn" onclick="saveBatch()">
+                    <i class="bi bi-check-circle me-1"></i>บันทึกทั้งหมด
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const csrfToken = () => (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '';
+let singleModal, batchModal, currentRowIdx = null;
+const vulnData = JSON.parse(document.getElementById('vuln-data').textContent);
+
+document.addEventListener('DOMContentLoaded', () => {
+    singleModal = new bootstrap.Modal(document.getElementById('singleModal'));
+    batchModal  = new bootstrap.Modal(document.getElementById('batchModal'));
+    document.getElementById('b-discovered').value = new Date().toISOString().slice(0,10);
+});
+
+function esc(s) {
+    return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+/* ── Selection ── */
+function toggleAll(chk) {
+    document.querySelectorAll('.row-chk').forEach(c => c.checked = chk.checked);
+    updateSelection();
+}
+
+function updateSelection() {
+    const selected = document.querySelectorAll('.row-chk:checked');
+    const n = selected.length;
+    document.getElementById('sel-count').textContent = n;
+    document.getElementById('btn-batch').classList.toggle('d-none', n === 0);
+    document.getElementById('sel-info').textContent = n > 0 ? `เลือก ${n} รายการ` : '';
+}
+
+/* ── Single Modal ── */
+function openSingleModal(cveId, title, severity, agentIp, description, detectedAt, rowIdx) {
+    currentRowIdx = rowIdx;
+    document.getElementById('s-cve').value        = cveId;
+    document.getElementById('s-title').value      = title || cveId;
+    document.getElementById('s-severity').value   = severity || 'MEDIUM';
+    document.getElementById('s-ip').value         = agentIp || '';
+    document.getElementById('s-desc').value       = description || '';
+    document.getElementById('s-discovered').value = detectedAt || new Date().toISOString().slice(0,10);
+    document.getElementById('s-due').value        = '';
+    document.getElementById('s-status').value     = 'open';
+    document.getElementById('s-remediation').value = '';
+    document.getElementById('single-alert').classList.add('d-none');
+    singleModal.show();
+}
+
+async function saveSingle() {
+    const title      = document.getElementById('s-title').value.trim();
+    const discovered = document.getElementById('s-discovered').value;
+    if (!title || !discovered) { showAlert('single-alert', 'กรุณากรอก Title และ Discovered At', 'danger'); return; }
+
+    const btn = document.getElementById('s-save-btn');
+    btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>กำลังบันทึก...';
+
+    const ok = await postVuln({
+        title, discovered_at: discovered,
+        cve_id:      document.getElementById('s-cve').value.trim(),
+        severity:    document.getElementById('s-severity').value,
+        status:      document.getElementById('s-status').value,
+        agent_ip:    document.getElementById('s-ip').value.trim() || null,
+        description: document.getElementById('s-desc').value.trim(),
+        remediation: document.getElementById('s-remediation').value.trim(),
+        due_date:    document.getElementById('s-due').value || null,
+    });
+
+    btn.disabled = false; btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>บันทึก';
+    if (ok) {
+        singleModal.hide();
+        markRowImported(currentRowIdx);
+    } else {
+        showAlert('single-alert', 'เกิดข้อผิดพลาด กรุณาลองใหม่', 'danger');
+    }
+}
+
+/* ── Batch Modal ── */
+function openBatchModal() {
+    const selected = [...document.querySelectorAll('.row-chk:checked')];
+    document.getElementById('batch-count').textContent = selected.length;
+    document.getElementById('b-discovered').value = new Date().toISOString().slice(0,10);
+    document.getElementById('b-due').value = '';
+    document.getElementById('b-status').value = 'open';
+    document.getElementById('b-remediation').value = '';
+    document.getElementById('batch-alert').classList.add('d-none');
+
+    // Preview list
+    const preview = selected.map(c =>
+        `<div class="d-flex align-items-center gap-2 py-1 border-bottom" style="border-color:#30363d!important;">
+            <span class="badge bg-secondary" style="font-size:0.65rem;">${c.dataset.sev}</span>
+            <code style="color:#79c0ff; font-size:0.75rem;">${c.dataset.cve || '—'}</code>
+            <span class="text-muted">${c.dataset.title.substring(0,60)}</span>
+        </div>`
+    ).join('');
+    document.getElementById('batch-preview').innerHTML = preview;
+    batchModal.show();
+}
+
+async function saveBatch() {
+    const discovered = document.getElementById('b-discovered').value;
+    if (!discovered) { showAlert('batch-alert', 'กรุณากรอก Discovered At', 'danger'); return; }
+
+    const selected = [...document.querySelectorAll('.row-chk:checked')];
+    const btn = document.getElementById('b-save-btn');
+    btn.disabled = true;
+
+    let success = 0, fail = 0;
+    for (const c of selected) {
+        btn.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span>บันทึก ${success+fail+1}/${selected.length}...`;
+        const ok = await postVuln({
+            title:        c.dataset.title || c.dataset.cve || 'Vulnerability',
+            cve_id:       c.dataset.cve,
+            severity:     c.dataset.sev,
+            status:       document.getElementById('b-status').value,
+            agent_ip:     c.dataset.ip || null,
+            description:  c.dataset.desc,
+            remediation:  document.getElementById('b-remediation').value.trim(),
+            discovered_at: discovered,
+            due_date:     document.getElementById('b-due').value || null,
+        });
+        if (ok) { success++; markRowImported(null, c); }
+        else fail++;
+    }
+
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>บันทึกทั้งหมด';
+    const msg = `บันทึกสำเร็จ ${success} รายการ${fail ? ` / ล้มเหลว ${fail} รายการ` : ''}`;
+    showAlert('batch-alert', msg, fail ? 'warning' : 'success');
+    if (success > 0) {
+        updateSelection();
+        setTimeout(() => { if (!fail) batchModal.hide(); }, 1500);
+    }
+}
+
+/* ── Helpers ── */
+async function postVuln(payload) {
+    try {
+        const resp = await fetch('/vulnerabilities/add/', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken()},
+            body: JSON.stringify(payload),
+        });
+        const data = await resp.json();
+        return data.ok;
+    } catch { return false; }
+}
+
+function markRowImported(rowIdx, checkbox) {
+    // Find checkbox element
+    const chk = checkbox || (rowIdx ? document.querySelector(`#row-${rowIdx} .row-chk`) : null);
+    if (!chk) return;
+    const row = chk.closest('tr');
+    if (!row) return;
+    row.style.opacity = '0.45';
+    // Replace checkbox cell
+    chk.closest('td').innerHTML = '';
+    // Replace button cell (last td)
+    const tds = row.querySelectorAll('td');
+    tds[tds.length - 1].innerHTML = '<span class="badge bg-success" style="font-size:0.7rem;"><i class="bi bi-check-circle me-1"></i>นำเข้าแล้ว</span>';
+}
+
+function showAlert(id, msg, type) {
+    const el = document.getElementById(id);
+    el.className = `alert alert-${type} mb-3`;
+    el.textContent = msg;
+    el.classList.remove('d-none');
+}
+</script>
+{% endblock %}

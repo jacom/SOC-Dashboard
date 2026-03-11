@@ -29,11 +29,16 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework.authtoken',
     'django_filters',
+    'django_otp',
+    'django_otp.plugins.otp_totp',
     'apps.core',
     'apps.alerts',
     'apps.incidents',
     'apps.notifications',
     'apps.config.apps.ConfigAppConfig',
+    'apps.assets',
+    'apps.vulnerabilities',
+    'apps.sla',
 ]
 
 MIDDLEWARE = [
@@ -43,6 +48,9 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'django_otp.middleware.OTPMiddleware',
+    'apps.core.middleware.OTPRequiredMiddleware',
+    'apps.core.middleware.LicenseMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -61,6 +69,7 @@ TEMPLATES = [
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
                 'apps.core.context_processors.app_version',
+                'apps.core.context_processors.user_role',
             ],
         },
     },
@@ -118,6 +127,9 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_DIRS = [BASE_DIR / 'static']
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
+
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # DRF
@@ -141,7 +153,20 @@ REST_FRAMEWORK = {
 # App settings
 DASHBOARD_URL = os.environ.get('DJANGO_DASHBOARD_URL', 'http://localhost:8500')
 
+# Wazuh Indexer (OpenSearch)
+WAZUH_INDEXER_URL      = os.environ.get('WAZUH_INDEXER_URL', 'https://127.0.0.1:9200')
+WAZUH_INDEXER_USERNAME = os.environ.get('WAZUH_INDEXER_USERNAME', 'admin')
+WAZUH_INDEXER_PASSWORD = os.environ.get('WAZUH_INDEXER_PASSWORD', '')
+WAZUH_VULN_INDEX       = os.environ.get('WAZUH_VULN_INDEX', 'wazuh-states-vulnerabilities-wazuh-server')
+
 # Authentication
 LOGIN_URL = '/login/'
 LOGIN_REDIRECT_URL = '/'
 LOGOUT_REDIRECT_URL = '/login/'
+
+# ── License ───────────────────────────────────────────────────────────────────
+# VENDOR SECRET: เฉพาะ vendor รู้ — ใช้ sign license keys
+# สร้างด้วย: python3 -c "import secrets; print(secrets.token_hex(32))"
+LICENSE_VENDOR_SECRET = os.environ.get('LICENSE_VENDOR_SECRET', '')
+# จำนวนวัน grace period สำหรับ installation ที่ยังไม่มี license key
+LICENSE_GRACE_DAYS = int(os.environ.get('LICENSE_GRACE_DAYS', '30'))

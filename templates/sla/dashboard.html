@@ -1,0 +1,407 @@
+{% extends "base.html" %}
+
+{% block title %}SLA Tracking — SOC Dashboard{% endblock %}
+
+{% block extra_head %}
+<style>
+    .sla-card { border-left: 4px solid #30363d; }
+    .sla-card.CRITICAL { border-color: #da3633; }
+    .sla-card.HIGH     { border-color: #d29922; }
+    .sla-card.MEDIUM   { border-color: #1f6feb; }
+    .sla-card.LOW      { border-color: #238636; }
+
+    .progress { background-color: #21262d; height: 8px; border-radius: 4px; }
+    .progress-bar.good { background-color: #238636; }
+    .progress-bar.warn { background-color: #d29922; }
+    .progress-bar.bad  { background-color: #da3633; }
+
+    .severity-pill {
+        display: inline-block; padding: 0.2em 0.65em; border-radius: 2em;
+        font-size: 0.72rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+    }
+    .sev-CRITICAL { background-color: #da3633; color: #fff; }
+    .sev-HIGH     { background-color: #d29922; color: #0d1117; }
+    .sev-MEDIUM   { background-color: #1f6feb; color: #fff; }
+    .sev-LOW      { background-color: #238636; color: #fff; }
+
+    .stat-big { font-size: 2rem; font-weight: 700; line-height: 1.1; }
+    .stat-sub { font-size: 0.78rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; }
+    .policy-value { color: #58a6ff; font-weight: 600; }
+    .overdue-badge {
+        background-color: #3d1717; border: 1px solid #da3633; color: #ff7b72;
+        padding: 0.2em 0.55em; border-radius: 4px; font-size: 0.75rem; font-weight: 600;
+    }
+    .section-label {
+        font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em;
+        color: #484f58; font-weight: 600; padding: 0.25rem 0;
+    }
+    .modal-content { background: #161b22; border: 1px solid #30363d; color: #c9d1d9; }
+    .modal-header  { border-bottom: 1px solid #30363d; }
+    .modal-footer  { border-top: 1px solid #30363d; }
+</style>
+{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb" class="mb-3">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="/">Dashboard</a></li>
+        <li class="breadcrumb-item active">SLA Tracking</li>
+    </ol>
+</nav>
+
+<div class="d-flex align-items-baseline gap-3 mb-4">
+    <h4 class="mb-0"><i class="bi bi-speedometer me-2 text-info"></i>SLA Tracking</h4>
+    <span class="text-muted" style="font-size:0.85rem;">Incident &amp; Vulnerability</span>
+</div>
+
+<!-- ══════════════════════════════════════════
+     SLA Policy Table
+══════════════════════════════════════════ -->
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-sliders me-2"></i>SLA Policies</span>
+        <span class="text-muted" style="font-size:0.78rem;">Resolve Time ใช้กับ Incident และ Vulnerability</span>
+    </div>
+    <div class="card-body p-0">
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr>
+                    <th>Severity</th>
+                    <th title="เวลาตอบสนองเบื้องต้น (สำหรับอ้างอิง)">Response Time</th>
+                    <th title="เวลาที่ต้อง Resolve Incident / Vulnerability">Resolve Time</th>
+                    <th style="width:100px;"></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for policy in all_policies %}
+                {% if policy.severity != 'INFO' %}
+                <tr>
+                    <td><span class="severity-pill sev-{{ policy.severity }}">{{ policy.severity }}</span></td>
+                    <td class="policy-value">{{ policy.response_hours|floatformat:"-1" }} ชม.</td>
+                    <td class="policy-value">
+                        {{ policy.resolve_hours|floatformat:"-1" }} ชม.
+                        <span class="text-muted" style="font-size:0.75rem;">
+                            (~{{ policy.resolve_hours|floatformat:"0"|add:"0" }} ชม. / {{ policy.resolve_hours }} ÷ 24 = {% widthratio policy.resolve_hours 24 1 %} วัน)
+                        </span>
+                    </td>
+                    <td>
+                        <button class="btn btn-sm btn-outline-secondary"
+                                onclick="openPolicyModal({{ policy.pk }}, '{{ policy.severity }}', {{ policy.response_hours }}, {{ policy.resolve_hours }})">
+                            <i class="bi bi-pencil me-1"></i>แก้ไข
+                        </button>
+                    </td>
+                </tr>
+                {% endif %}
+                {% empty %}
+                <tr><td colspan="4" class="text-center text-muted py-3">ยังไม่มี SLA Policy</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     INCIDENT SLA
+══════════════════════════════════════════ -->
+<div class="section-label mb-2"><i class="bi bi-folder2-open me-1"></i>Incident SLA Compliance</div>
+
+<div class="row g-3 mb-4">
+    {% for s in inc_stats %}
+    <div class="col-6 col-xl-3">
+        <div class="card sla-card {{ s.severity }} h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start mb-2">
+                    <span class="severity-pill sev-{{ s.severity }}">{{ s.severity }}</span>
+                    {% if s.policy %}
+                    <span class="text-muted" style="font-size:0.72rem;">{{ s.policy.resolve_hours|floatformat:"-1" }}h</span>
+                    {% else %}
+                    <span class="text-muted" style="font-size:0.72rem;">No policy</span>
+                    {% endif %}
+                </div>
+                <div class="stat-big mb-0 text-{{ s.color }}">{{ s.pct }}%</div>
+                <div class="stat-sub mb-2">Resolved in SLA</div>
+                <div class="progress mb-2">
+                    <div class="progress-bar {% if s.pct >= 80 %}good{% elif s.pct >= 50 %}warn{% else %}bad{% endif %}"
+                         style="width:{{ s.pct }}%"></div>
+                </div>
+                <div style="font-size:0.8rem; color:#8b949e;">
+                    <div>Total: <span style="color:#c9d1d9;">{{ s.total }}</span></div>
+                    <div>Resolved in SLA: <span style="color:#3fb950;">{{ s.compliant }}</span></div>
+                    <div>Breached (open): <span style="color:#ff7b72;">{{ s.breached }}</span></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- Breached Incidents -->
+<div class="card mb-5">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span>
+            <i class="bi bi-exclamation-octagon me-2 text-danger"></i>Breached Incidents
+            <span class="badge bg-danger ms-1">{{ breached_incidents|length }}</span>
+        </span>
+        <span class="text-muted" style="font-size:0.78rem;">Incident ที่เกิน Resolve SLA และยังไม่ปิด</span>
+    </div>
+    <div class="card-body p-0">
+        {% if breached_incidents %}
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr>
+                    <th>Case ID</th>
+                    <th>Title</th>
+                    <th>Severity</th>
+                    <th>Status</th>
+                    <th>Created</th>
+                    <th>Overdue</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in breached_incidents %}
+                <tr>
+                    <td><code style="color:#79c0ff; font-size:0.82rem;">{{ row.inc.thehive_case_id }}</code></td>
+                    <td style="max-width:280px; font-size:0.82rem;">{{ row.inc.title|truncatechars:60 }}</td>
+                    <td><span class="severity-pill sev-{{ row.inc.severity }}">{{ row.inc.severity }}</span></td>
+                    <td><span class="badge bg-warning text-dark" style="font-size:0.72rem;">{{ row.inc.status }}</span></td>
+                    <td style="font-size:0.82rem; white-space:nowrap;">{{ row.inc.created_at|date:"d M Y H:i" }}</td>
+                    <td>
+                        <span class="overdue-badge">
+                            <i class="bi bi-clock-history me-1"></i>
+                            {% if row.overdue_h < 48 %}
+                                {{ row.overdue_h }}h overdue
+                            {% else %}
+                                {% widthratio row.overdue_h 24 1 %}d overdue
+                            {% endif %}
+                        </span>
+                    </td>
+                    <td>
+                        <a href="{{ row.inc.thehive_url }}" target="_blank"
+                           class="btn btn-sm btn-outline-secondary" title="View in TheHive">
+                            <i class="bi bi-box-arrow-up-right"></i>
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="text-center py-5 text-muted">
+            <i class="bi bi-check-circle" style="font-size:2.5rem; color:#238636;"></i>
+            <p class="mt-2 mb-0">ไม่มี Incident ที่ Breach SLA</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     VULNERABILITY SLA
+══════════════════════════════════════════ -->
+<div class="section-label mb-2"><i class="bi bi-shield-exclamation me-1"></i>Vulnerability SLA Compliance</div>
+
+<div class="row g-3 mb-4">
+    {% for s in vuln_stats %}
+    <div class="col-6 col-xl-3">
+        <div class="card sla-card {{ s.severity }} h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start mb-2">
+                    <span class="severity-pill sev-{{ s.severity }}">{{ s.severity }}</span>
+                    {% if s.policy %}
+                    <span class="text-muted" style="font-size:0.72rem;">
+                        {% widthratio s.policy.resolve_hours 24 1 %}d
+                    </span>
+                    {% else %}
+                    <span class="text-muted" style="font-size:0.72rem;">No policy</span>
+                    {% endif %}
+                </div>
+                <div class="stat-big mb-0 text-{{ s.color }}">{{ s.pct }}%</div>
+                <div class="stat-sub mb-2">Resolved in SLA</div>
+                <div class="progress mb-2">
+                    <div class="progress-bar {% if s.pct >= 80 %}good{% elif s.pct >= 50 %}warn{% else %}bad{% endif %}"
+                         style="width:{{ s.pct }}%"></div>
+                </div>
+                <div style="font-size:0.8rem; color:#8b949e;">
+                    <div>Total: <span style="color:#c9d1d9;">{{ s.total }}</span></div>
+                    <div>Resolved in SLA: <span style="color:#3fb950;">{{ s.compliant }}</span></div>
+                    <div>Breached (open): <span style="color:#ff7b72;">{{ s.breached }}</span></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- Breached Vulnerabilities -->
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span>
+            <i class="bi bi-shield-x me-2 text-danger"></i>Breached Vulnerabilities
+            <span class="badge bg-danger ms-1">{{ breached_vulns|length }}</span>
+        </span>
+        <span class="text-muted" style="font-size:0.78rem;">Vulnerability ที่เกิน Resolve SLA และยังไม่แก้ไข</span>
+    </div>
+    <div class="card-body p-0">
+        {% if breached_vulns %}
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr>
+                    <th>CVE ID</th>
+                    <th>Title</th>
+                    <th>Severity</th>
+                    <th>Status</th>
+                    <th>Asset IP</th>
+                    <th>Discovered</th>
+                    <th>Overdue</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in breached_vulns %}
+                <tr>
+                    <td>
+                        {% if row.vuln.cve_id %}
+                        <a href="https://nvd.nist.gov/vuln/detail/{{ row.vuln.cve_id }}"
+                           target="_blank" style="color:#79c0ff; font-size:0.82rem; text-decoration:none;">
+                            {{ row.vuln.cve_id }}
+                        </a>
+                        {% else %}
+                        <span class="text-muted small">—</span>
+                        {% endif %}
+                    </td>
+                    <td style="max-width:260px; font-size:0.82rem;">{{ row.vuln.title|truncatechars:55 }}</td>
+                    <td><span class="severity-pill sev-{{ row.vuln.severity }}">{{ row.vuln.severity }}</span></td>
+                    <td>
+                        <span class="badge bg-danger" style="font-size:0.72rem;">{{ row.vuln.get_status_display }}</span>
+                    </td>
+                    <td class="small text-muted">{{ row.vuln.agent_ip|default:"—" }}</td>
+                    <td style="font-size:0.82rem; white-space:nowrap;">{{ row.vuln.discovered_at|date:"d M Y" }}</td>
+                    <td>
+                        <span class="overdue-badge">
+                            <i class="bi bi-clock-history me-1"></i>{{ row.overdue_days|floatformat:"0" }}d overdue
+                        </span>
+                    </td>
+                    <td>
+                        <a href="/vulnerabilities/{{ row.vuln.pk }}/"
+                           class="btn btn-sm btn-outline-secondary" title="View">
+                            <i class="bi bi-arrow-right"></i>
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="text-center py-5 text-muted">
+            <i class="bi bi-shield-check" style="font-size:2.5rem; color:#238636;"></i>
+            <p class="mt-2 mb-0">ไม่มี Vulnerability ที่ Breach SLA</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     Policy Edit Modal
+══════════════════════════════════════════ -->
+<div class="modal fade" id="policyModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="bi bi-sliders me-2"></i>แก้ไข SLA Policy —
+                    <span id="modal-severity-label"></span>
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="modal-pk">
+                <input type="hidden" id="modal-severity">
+                <div class="mb-3">
+                    <label class="form-label" for="modal-response-hours">
+                        Response Time (ชั่วโมง)
+                        <span class="text-muted" style="font-size:0.78rem;">— สำหรับอ้างอิง</span>
+                    </label>
+                    <input type="number" id="modal-response-hours" class="form-control"
+                           step="0.5" min="0.5" placeholder="e.g. 4">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label" for="modal-resolve-hours">
+                        Resolve Time (ชั่วโมง)
+                        <span class="text-muted" style="font-size:0.78rem;">— ใช้ track Incident &amp; Vulnerability</span>
+                    </label>
+                    <input type="number" id="modal-resolve-hours" class="form-control"
+                           step="0.5" min="0.5" placeholder="e.g. 72">
+                    <div class="form-text" id="resolve-days-hint" style="color:#58a6ff;"></div>
+                </div>
+                <div id="modal-error" class="alert alert-danger d-none"
+                     style="background:#3d1717; border-color:#da3633; color:#ff7b72;"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">ยกเลิก</button>
+                <button type="button" class="btn btn-primary btn-sm" onclick="savePolicy()">
+                    <i class="bi bi-check-lg me-1"></i>บันทึก
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+let _policyModal = null;
+
+function openPolicyModal(pk, severity, responseH, resolveH) {
+    document.getElementById('modal-pk').value = pk;
+    document.getElementById('modal-severity').value = severity;
+    document.getElementById('modal-severity-label').textContent = severity;
+    document.getElementById('modal-response-hours').value = responseH;
+    document.getElementById('modal-resolve-hours').value = resolveH;
+    document.getElementById('modal-error').classList.add('d-none');
+    updateDaysHint(resolveH);
+
+    if (!_policyModal) _policyModal = new bootstrap.Modal(document.getElementById('policyModal'));
+    _policyModal.show();
+}
+
+document.getElementById('modal-resolve-hours').addEventListener('input', function() {
+    updateDaysHint(parseFloat(this.value));
+});
+
+function updateDaysHint(h) {
+    const hint = document.getElementById('resolve-days-hint');
+    if (!isNaN(h) && h > 0) {
+        const d = (h / 24).toFixed(1);
+        hint.textContent = `= ประมาณ ${d} วัน`;
+    } else {
+        hint.textContent = '';
+    }
+}
+
+function savePolicy() {
+    const severity = document.getElementById('modal-severity').value;
+    const responseH = parseFloat(document.getElementById('modal-response-hours').value);
+    const resolveH  = parseFloat(document.getElementById('modal-resolve-hours').value);
+    const errEl = document.getElementById('modal-error');
+
+    if (!severity || isNaN(responseH) || isNaN(resolveH) || responseH <= 0 || resolveH <= 0) {
+        errEl.textContent = 'กรุณากรอกค่าให้ถูกต้อง (ต้องมากกว่า 0)';
+        errEl.classList.remove('d-none');
+        return;
+    }
+
+    const csrf = (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '';
+    fetch('/sla/policies/save/', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrf},
+        body: JSON.stringify({severity, response_hours: responseH, resolve_hours: resolveH}),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.ok) { if (_policyModal) _policyModal.hide(); location.reload(); }
+        else { errEl.textContent = data.error || 'เกิดข้อผิดพลาด'; errEl.classList.remove('d-none'); }
+    })
+    .catch(err => { errEl.textContent = 'Network error: ' + err; errEl.classList.remove('d-none'); });
+}
+</script>
+{% endblock %}

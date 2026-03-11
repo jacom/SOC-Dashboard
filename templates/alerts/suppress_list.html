@@ -1,0 +1,238 @@
+{% extends 'base.html' %}
+{% block title %}Alert Suppress Rules{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb mb-1" style="font-size:0.85rem;">
+                <li class="breadcrumb-item"><a href="/" style="color:#58a6ff;">Dashboard</a></li>
+                <li class="breadcrumb-item"><a href="/alerts/" style="color:#58a6ff;">Alerts</a></li>
+                <li class="breadcrumb-item active" style="color:#8b949e;">Suppress Rules</li>
+            </ol>
+        </nav>
+        <h4 class="mb-0"><i class="bi bi-bell-slash me-2" style="color:#f0883e;"></i>Alert Suppress Rules</h4>
+        <p class="text-muted mb-0" style="font-size:0.85rem;">
+            ปิดการแจ้งเตือนสำหรับ alert ที่รู้แล้วว่า false positive หรือไม่มีผลกระทบ
+        </p>
+    </div>
+</div>
+
+<!-- Rate limit info -->
+<div class="alert alert-secondary d-flex gap-2 py-2 mb-3" style="background:#161b22; border:1px solid #30363d; font-size:0.85rem;">
+    <i class="bi bi-clock-history text-info mt-1"></i>
+    <div>
+        <strong style="color:#c9d1d9;">Rate Limit:</strong>
+        <span class="text-muted"> alert ที่มี rule_id + agent_ip เดียวกันจะแจ้งเตือน <strong style="color:#58a6ff;">ชั่วโมงละ 1 ครั้ง</strong> (คนละเรื่องกับ Suppress — rate limit ใช้กับทุก alert)</span>
+    </div>
+</div>
+
+<!-- Add rule form -->
+<div class="card mb-3">
+    <div class="card-header">
+        <i class="bi bi-plus-circle me-2" style="color:#3fb950;"></i>เพิ่ม Suppress Rule
+    </div>
+    <div class="card-body">
+        <div class="row g-2 align-items-end">
+            <div class="col-md-3">
+                <label class="field-label" style="font-size:0.8rem; color:#8b949e; text-transform:uppercase;">Rule ID <span class="text-danger">*</span></label>
+                <input type="text" id="add-rule-id" class="form-control form-control-sm" placeholder="เช่น 92058">
+            </div>
+            <div class="col-md-3">
+                <label class="field-label" style="font-size:0.8rem; color:#8b949e; text-transform:uppercase;">Agent IP <small class="text-muted">(ว่าง = ทุก agent)</small></label>
+                <input type="text" id="add-agent-ip" class="form-control form-control-sm" placeholder="เช่น 192.168.40.7">
+            </div>
+            <div class="col-md-4">
+                <label class="field-label" style="font-size:0.8rem; color:#8b949e; text-transform:uppercase;">เหตุผล</label>
+                <input type="text" id="add-reason" class="form-control form-control-sm" placeholder="เช่น false positive / โปรแกรมภายในองค์กร">
+            </div>
+            <div class="col-md-2">
+                <button class="btn btn-sm btn-success w-100" onclick="addSuppressRule()">
+                    <i class="bi bi-plus-circle me-1"></i>เพิ่ม
+                </button>
+            </div>
+        </div>
+        <div id="add-result" class="mt-2 small" style="display:none;"></div>
+    </div>
+</div>
+
+<!-- Rules table -->
+<div class="card">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0" id="suppress-table">
+                <thead>
+                    <tr>
+                        <th>Rule ID</th>
+                        <th>Agent IP</th>
+                        <th>เหตุผล</th>
+                        <th>สถานะ</th>
+                        <th>เพิ่มเมื่อ</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="suppress-tbody">
+                    {% for rule in rules %}
+                    <tr id="row-{{ rule.pk }}">
+                        <td><code style="color:#79c0ff;">{{ rule.rule_id }}</code></td>
+                        <td>
+                            {% if rule.agent_ip %}
+                                <code style="color:#79c0ff;">{{ rule.agent_ip }}</code>
+                            {% else %}
+                                <span class="badge bg-secondary">ทุก agent</span>
+                            {% endif %}
+                        </td>
+                        <td><small class="text-muted">{{ rule.reason|default:"—" }}</small></td>
+                        <td>
+                            {% if rule.is_active %}
+                                <span class="badge bg-danger" id="status-{{ rule.pk }}">
+                                    <i class="bi bi-bell-slash me-1"></i>Suppressed
+                                </span>
+                            {% else %}
+                                <span class="badge bg-secondary" id="status-{{ rule.pk }}">
+                                    <i class="bi bi-bell me-1"></i>Inactive
+                                </span>
+                            {% endif %}
+                        </td>
+                        <td><small class="text-muted">{{ rule.created_at|date:"d M Y H:i" }}</small></td>
+                        <td>
+                            <div class="d-flex gap-1">
+                                <button class="btn btn-sm btn-outline-secondary" title="Toggle" onclick="toggleRule({{ rule.pk }})">
+                                    <i class="bi bi-toggle-{% if rule.is_active %}on text-success{% else %}off{% endif %}" id="toggle-icon-{{ rule.pk }}"></i>
+                                </button>
+                                <button class="btn btn-sm btn-outline-danger" title="Delete" onclick="deleteRule({{ rule.pk }})">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr id="empty-row">
+                        <td colspan="6" class="text-center text-muted py-5">
+                            <i class="bi bi-bell-check display-6 d-block mb-2"></i>
+                            ยังไม่มี Suppress Rule — alert ทุกตัวจะถูกแจ้งเตือนตามปกติ
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div class="card mt-3" style="border-color:#30363d;">
+    <div class="card-body py-3" style="font-size:0.84rem; color:#8b949e;">
+        <strong style="color:#c9d1d9;"><i class="bi bi-info-circle me-1"></i>วิธีลด Level ใน Wazuh (แก้ที่ต้นทาง)</strong><br>
+        ถ้าต้องการลด level ของ rule เฉพาะใน Wazuh ให้แก้ไฟล์:<br>
+        <code style="color:#58a6ff;">/var/ossec/etc/rules/local_rules.xml</code><br><br>
+        <pre style="background:#0d1117; padding:0.75rem; border-radius:6px; border:1px solid #30363d; color:#e6edf3; font-size:0.82rem;">&lt;group name="local,"&gt;
+  &lt;!-- ลด level ของ rule 92058 จาก 12 เป็น 3 --&gt;
+  &lt;rule id="100001" level="3" overwrite="yes"&gt;
+    &lt;if_sid&gt;92058&lt;/if_sid&gt;
+    &lt;description&gt;Application Compatibility Database (ลด level)&lt;/description&gt;
+  &lt;/rule&gt;
+&lt;/group&gt;</pre>
+        จากนั้น restart Wazuh: <code style="color:#58a6ff;">sudo systemctl restart wazuh-manager</code>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const csrfToken = (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '';
+
+async function addSuppressRule() {
+    const ruleId  = document.getElementById('add-rule-id').value.trim();
+    const agentIp = document.getElementById('add-agent-ip').value.trim();
+    const reason  = document.getElementById('add-reason').value.trim();
+    const resultEl = document.getElementById('add-result');
+
+    if (!ruleId) {
+        resultEl.style.display = 'block';
+        resultEl.innerHTML = '<span class="text-danger">กรุณาระบุ Rule ID</span>';
+        return;
+    }
+
+    const fd = new FormData();
+    fd.append('rule_id',  ruleId);
+    fd.append('agent_ip', agentIp);
+    fd.append('reason',   reason);
+
+    try {
+        const resp = await fetch('/alerts/suppress/add/', { method: 'POST', headers: {'X-CSRFToken': csrfToken}, body: fd });
+        const data = await resp.json();
+        if (data.ok) {
+            resultEl.style.display = 'block';
+            resultEl.innerHTML = `<span class="text-success"><i class="bi bi-check-circle-fill me-1"></i>${data.created ? 'เพิ่มแล้ว' : 'อัปเดตแล้ว'} — rule_id=${data.rule_id} / ${data.agent_ip || 'ทุก agent'}</span>`;
+            // Remove empty row if exists
+            const emptyRow = document.getElementById('empty-row');
+            if (emptyRow) emptyRow.remove();
+            // Add row to table
+            const tbody = document.getElementById('suppress-tbody');
+            const tr = document.createElement('tr');
+            tr.id = `row-${data.id}`;
+            tr.innerHTML = `
+                <td><code style="color:#79c0ff;">${data.rule_id}</code></td>
+                <td>${data.agent_ip ? `<code style="color:#79c0ff;">${data.agent_ip}</code>` : '<span class="badge bg-secondary">ทุก agent</span>'}</td>
+                <td><small class="text-muted">${data.reason || '—'}</small></td>
+                <td><span class="badge bg-danger" id="status-${data.id}"><i class="bi bi-bell-slash me-1"></i>Suppressed</span></td>
+                <td><small class="text-muted">ตอนนี้</small></td>
+                <td>
+                    <div class="d-flex gap-1">
+                        <button class="btn btn-sm btn-outline-secondary" onclick="toggleRule(${data.id})">
+                            <i class="bi bi-toggle-on text-success" id="toggle-icon-${data.id}"></i>
+                        </button>
+                        <button class="btn btn-sm btn-outline-danger" onclick="deleteRule(${data.id})">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
+                </td>`;
+            tbody.prepend(tr);
+            // Clear inputs
+            document.getElementById('add-rule-id').value = '';
+            document.getElementById('add-agent-ip').value = '';
+            document.getElementById('add-reason').value = '';
+        } else {
+            resultEl.style.display = 'block';
+            resultEl.innerHTML = `<span class="text-danger">${data.error}</span>`;
+        }
+    } catch(e) {
+        resultEl.style.display = 'block';
+        resultEl.innerHTML = '<span class="text-danger">Request failed</span>';
+    }
+}
+
+async function toggleRule(pk) {
+    const resp = await fetch(`/alerts/suppress/${pk}/toggle/`, { method: 'POST', headers: {'X-CSRFToken': csrfToken} });
+    const data = await resp.json();
+    if (data.ok) {
+        const badge = document.getElementById(`status-${pk}`);
+        const icon  = document.getElementById(`toggle-icon-${pk}`);
+        if (data.is_active) {
+            badge.className = 'badge bg-danger';
+            badge.innerHTML = '<i class="bi bi-bell-slash me-1"></i>Suppressed';
+            icon.className = 'bi bi-toggle-on text-success';
+        } else {
+            badge.className = 'badge bg-secondary';
+            badge.innerHTML = '<i class="bi bi-bell me-1"></i>Inactive';
+            icon.className = 'bi bi-toggle-off';
+        }
+    }
+}
+
+async function deleteRule(pk) {
+    if (!confirm('ลบ suppress rule นี้?')) return;
+    const resp = await fetch(`/alerts/suppress/${pk}/delete/`, { method: 'POST', headers: {'X-CSRFToken': csrfToken} });
+    const data = await resp.json();
+    if (data.ok) {
+        const row = document.getElementById(`row-${pk}`);
+        if (row) row.remove();
+        if (!document.querySelector('#suppress-tbody tr')) {
+            document.getElementById('suppress-tbody').innerHTML = `
+                <tr id="empty-row"><td colspan="6" class="text-center text-muted py-5">
+                <i class="bi bi-bell-check display-6 d-block mb-2"></i>ยังไม่มี Suppress Rule</td></tr>`;
+        }
+    }
+}
+</script>
+{% endblock %}

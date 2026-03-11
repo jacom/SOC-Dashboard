@@ -81,8 +81,13 @@ _read() {
 _read "App user (default: soc): " APP_USER
 APP_USER="${APP_USER:-soc}"
 
-_read "Install path (default: /home/${APP_USER}/soc-dashboard): " APP_DIR
-APP_DIR="${APP_DIR:-/home/${APP_USER}/soc-dashboard}"
+if [[ "$RUNNING_VIA_CURL" == false ]]; then
+    DEFAULT_APP_DIR="$PROJECT_SRC"
+else
+    DEFAULT_APP_DIR="/home/${APP_USER}/soc-dashboard"
+fi
+_read "Install path (default: ${DEFAULT_APP_DIR}): " APP_DIR
+APP_DIR="${APP_DIR:-$DEFAULT_APP_DIR}"
 
 DEFAULT_IP=$(hostname -I | awk '{print $1}')
 _read "Server IP (default: ${DEFAULT_IP}): " SERVER_IP
@@ -112,6 +117,11 @@ SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(50))" 2>/dev/nu
 _read "Install Ollama for AI analysis? [y/N]: " INSTALL_OLLAMA
 INSTALL_OLLAMA="${INSTALL_OLLAMA:-n}"
 
+_read "Install TheHive 5 (incident management)? [y/N]: " INSTALL_THEHIVE
+INSTALL_THEHIVE="${INSTALL_THEHIVE:-n}"
+
+THEHIVE_PORT=9000
+
 echo ""
 info "Configuration summary:"
 echo "  OS          : ${PRETTY_NAME}"
@@ -138,7 +148,7 @@ if [[ "$OS_FAMILY" == "debian" ]]; then
         redis-server \
         nginx \
         git build-essential libpq-dev \
-        curl openssl
+        curl wget openssl
     REDIS_SERVICE="redis-server"
     PYTHON_BIN="python3.11"
 
@@ -151,12 +161,26 @@ elif [[ "$OS_FAMILY" == "rhel" ]]; then
         nginx \
         git gcc \
         curl openssl \
+        zstd \
         policycoreutils-python-utils
     REDIS_SERVICE="redis"
     PYTHON_BIN="python3.11"
 
-    # PostgreSQL 15 (default repo มีแค่ 13 ซึ่ง Django 5 ไม่รองรับ)
-    if ! command -v psql &>/dev/null || ! psql --version 2>/dev/null | grep -qE "1[456789]\."; then
+    # PostgreSQL 15 — ตรวจ service ที่มีจริงในระบบก่อน
+    if systemctl list-unit-files | grep -q "^postgresql-15\.service"; then
+        # PG15 จาก PGDG ติดตั้งแล้ว
+        PG_SERVICE="postgresql-15"
+        PG_BIN="/usr/pgsql-15/bin"
+        PG_DATA="/var/lib/pgsql/15/data"
+        ok "พบ postgresql-15 ที่ติดตั้งไว้แล้ว"
+    elif systemctl list-unit-files | grep -q "^postgresql\.service"; then
+        # PostgreSQL จาก default repo (PG13)
+        PG_SERVICE="postgresql"
+        PG_BIN=""
+        PG_DATA="/var/lib/pgsql/data"
+        ok "พบ postgresql (base repo) ที่ติดตั้งไว้แล้ว"
+    else
+        # ยังไม่มี — ติดตั้ง PG15 จาก PGDG (default repo มีแค่ 13 ซึ่ง Django 5 ไม่รองรับ)
         info "ติดตั้ง PostgreSQL 15 จาก pgdg repo..."
         dnf install -y https://download.postgresql.org/pub/repos/yum/reporpms/EL-9-x86_64/pgdg-redhat-repo-latest.noarch.rpm 2>/dev/null || true
         dnf -qy module disable postgresql 2>/dev/null || true
@@ -164,10 +188,6 @@ elif [[ "$OS_FAMILY" == "rhel" ]]; then
         PG_SERVICE="postgresql-15"
         PG_BIN="/usr/pgsql-15/bin"
         PG_DATA="/var/lib/pgsql/15/data"
-    else
-        PG_SERVICE="postgresql"
-        PG_BIN=""
-        PG_DATA="/var/lib/pgsql/data"
     fi
 fi
 
@@ -190,14 +210,19 @@ if [[ "$OS_FAMILY" == "rhel" ]]; then
         ok "PostgreSQL cluster already exists"
     fi
 
-    # เปลี่ยน ident/peer → md5
+    # เปลี่ยน ident/peer → md5 (เฉพาะ local all all และ host lines)
     PG_HBA="${PG_DATA}/pg_hba.conf"
-    if grep -q "ident\|peer" "$PG_HBA"; then
-        cp "${PG_HBA}" "${PG_HBA}.bak.$(date +%Y%m%d%H%M%S)"
-        sed -i 's/^\(host[[:space:]].*\)ident$/\1md5/'  "$PG_HBA"
-        sed -i 's/^\(local[[:space:]].*all[[:space:]].*all[[:space:]]\+\)peer$/\1md5/' "$PG_HBA"
-        ok "pg_hba.conf: auth method → md5"
+    cp "${PG_HBA}" "${PG_HBA}.bak.$(date +%Y%m%d%H%M%S)"
+    sed -i 's/^\(host[[:space:]].*\)ident$/\1md5/'  "$PG_HBA"
+    sed -i 's/^\(local[[:space:]].*all[[:space:]].*all[[:space:]]\+\)peer$/\1md5/' "$PG_HBA"
+    ok "pg_hba.conf: auth method → md5"
+
+    # เพิ่ม peer สำหรับ postgres OS user ที่บรรทัดแรก เพื่อให้ sudo -u postgres psql ทำงานได้โดยไม่ต้องใส่ password
+    if ! grep -q "^local[[:space:]].*all[[:space:]].*postgres[[:space:]].*peer" "$PG_HBA"; then
+        sed -i '1s/^/local   all             postgres                                peer\n/' "$PG_HBA"
+        ok "pg_hba.conf: เพิ่ม peer สำหรับ postgres user"
     fi
+
     if ! grep -q "^host.*127.0.0.1" "$PG_HBA"; then
         echo "host    all             all             127.0.0.1/32            md5" >> "$PG_HBA"
         ok "pg_hba.conf: เพิ่ม host 127.0.0.1"
@@ -210,7 +235,7 @@ systemctl enable --now "${PG_SERVICE:-postgresql}"
 PSQL_BIN="${PG_BIN:+${PG_BIN}/}psql"
 command -v "$PSQL_BIN" &>/dev/null || PSQL_BIN="$(find /usr/pgsql-*/bin /usr/bin /usr/local/bin -name psql 2>/dev/null | head -1)"
 
-cd /tmp && sudo -u postgres "$PSQL_BIN" -v ON_ERROR_STOP=0 <<SQL
+cd /tmp && sudo -u postgres "$PSQL_BIN" -v ON_ERROR_STOP=1 <<SQL
 DO \$\$
 BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${DB_USER}') THEN
@@ -227,6 +252,14 @@ WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '${DB_NAME}')
 
 GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};
 SQL
+
+# ตรวจสอบว่า user และ database สร้างสำเร็จ
+cd /tmp && sudo -u postgres "$PSQL_BIN" -tAc \
+    "SELECT 1 FROM pg_roles WHERE rolname='${DB_USER}'" | grep -q 1 \
+    || err "PostgreSQL: สร้าง user '${DB_USER}' ไม่สำเร็จ"
+cd /tmp && sudo -u postgres "$PSQL_BIN" -tAc \
+    "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}'" | grep -q 1 \
+    || err "PostgreSQL: สร้าง database '${DB_NAME}' ไม่สำเร็จ"
 
 ok "PostgreSQL: '${DB_NAME}' / '${DB_USER}' ready"
 
@@ -251,6 +284,17 @@ fi
 
 mkdir -p "$APP_DIR"
 chown "${APP_USER}:${APP_USER}" "$APP_DIR"
+
+# ถ้า APP_DIR อยู่ใน home ของ user อื่น ให้เพิ่ม execute bit เพื่อให้ APP_USER traverse ได้
+_parent="$(dirname "$APP_DIR")"
+while [[ "$_parent" != "/" ]]; do
+    if [[ "$(stat -c '%U' "$_parent")" != "$APP_USER" ]] && \
+       ! sudo -u "$APP_USER" test -x "$_parent" 2>/dev/null; then
+        chmod o+x "$_parent"
+        info "chmod o+x ${_parent} (เพื่อให้ ${APP_USER} เข้าถึง APP_DIR ได้)"
+    fi
+    _parent="$(dirname "$_parent")"
+done
 
 if [[ "$RUNNING_VIA_CURL" == true ]]; then
     # Clone จาก GitHub
@@ -282,6 +326,10 @@ elif [[ -f "$APP_DIR/manage.py" ]]; then
 else
     err "ไม่พบ manage.py — กรุณาตรวจสอบ GITHUB_REPO ในไฟล์นี้"
 fi
+
+# ให้ APP_USER เป็นเจ้าของทุกไฟล์ใน APP_DIR (รวมกรณีรัน in-place)
+chown -R "${APP_USER}:${APP_USER}" "$APP_DIR"
+ok "Ownership: ${APP_DIR} → ${APP_USER}"
 
 # =============================================================================
 # STEP 5 — Python virtualenv & dependencies
@@ -335,6 +383,10 @@ EOF
 
 chown "${APP_USER}:${APP_USER}" "$ENV_FILE"
 chmod 640 "$ENV_FILE"
+# SELinux: ให้ systemd อ่าน .env ได้ (user_home_t → etc_t)
+if command -v getenforce &>/dev/null && [[ "$(getenforce)" != "Disabled" ]]; then
+    chcon -t etc_t "$ENV_FILE" 2>/dev/null || true
+fi
 ok "Dashboard .env created at ${ENV_FILE}"
 
 # soc-bot .env
@@ -374,6 +426,10 @@ LOG_LEVEL=INFO
 EOF
     chown "${APP_USER}:${APP_USER}" "$BOT_ENV_FILE"
     chmod 640 "$BOT_ENV_FILE"
+    # SELinux: ให้ systemd อ่าน .env ได้
+    if command -v getenforce &>/dev/null && [[ "$(getenforce)" != "Disabled" ]]; then
+        chcon -t etc_t "$BOT_ENV_FILE" 2>/dev/null || true
+    fi
     ok "soc-bot .env created at ${BOT_ENV_FILE}"
 fi
 
@@ -386,11 +442,31 @@ mkdir -p "${APP_DIR}/static" "${APP_DIR}/staticfiles"
 chown -R "${APP_USER}:${APP_USER}" "${APP_DIR}/static" "${APP_DIR}/staticfiles"
 
 sudo -u "$APP_USER" bash -c "
+    set -e
     cd '${APP_DIR}'
+    # ตรวจ model ที่ยังไม่มี migration
     venv/bin/python manage.py migrate --noinput
     venv/bin/python manage.py collectstatic --noinput
 "
 ok "Migrations and static files done"
+
+# ตรวจว่า config groups ครบ (openai, moph) — ถ้าไม่ครบอาจ seed ไม่สำเร็จ
+_missing_groups=$(sudo -u "$APP_USER" bash -c "
+    cd '${APP_DIR}'
+    venv/bin/python manage.py shell -c \"
+from apps.config.models import IntegrationConfig
+existing = set(IntegrationConfig.objects.values_list('group', flat=True).distinct())
+required = {'wazuh','ollama','openai','thehive','moph','system'}
+missing = required - existing
+print(','.join(missing) if missing else '')
+\" 2>/dev/null
+" 2>/dev/null || true)
+
+if [[ -n "$_missing_groups" ]]; then
+    warn "Config groups ที่ขาดใน DB: ${_missing_groups} — อาจต้องตรวจสอบ migrations"
+else
+    ok "Config groups ครบ (wazuh, ollama, openai, thehive, moph, system)"
+fi
 
 # =============================================================================
 # STEP 8 — Nginx
@@ -492,28 +568,68 @@ fi
 # =============================================================================
 if [[ "$OS_FAMILY" == "rhel" ]]; then
     step "10. SELinux"
-    if command -v getenforce &>/dev/null && [[ "$(getenforce)" != "Disabled" ]]; then
-        info "SELinux mode: $(getenforce)"
+
+    SELINUX_STATUS="$(getenforce 2>/dev/null || echo Disabled)"
+    if [[ "$SELINUX_STATUS" == "Disabled" ]]; then
+        info "SELinux: Disabled — ข้ามขั้นตอนนี้ทั้งหมด"
+    else
+        info "SELinux mode: ${SELINUX_STATUS}"
+
+        # อนุญาต nginx proxy ไปยัง gunicorn
         setsebool -P httpd_can_network_connect 1
         ok "SELinux: httpd_can_network_connect=1"
 
+        # เพิ่ม/แก้ไข port ใน http_port_t (ใช้ -m ถ้ามีอยู่แล้ว, -a ถ้ายังไม่มี)
         for PORT in "${DASHBOARD_PORT}" "${GUNICORN_PORT}"; do
-            if ! semanage port -l | grep -q "http_port_t.*${PORT}"; then
-                semanage port -a -t http_port_t -p tcp "${PORT}" && \
-                    ok "SELinux: port ${PORT} → http_port_t" || \
-                    warn "SELinux: port ${PORT} อาจมีอยู่แล้ว"
-            else
+            if semanage port -l | grep -q "http_port_t.*\b${PORT}\b"; then
                 ok "SELinux: port ${PORT} already in http_port_t"
+            elif semanage port -l | grep -q ".*\b${PORT}\b"; then
+                semanage port -m -t http_port_t -p tcp "${PORT}" && \
+                    ok "SELinux: port ${PORT} → http_port_t (modified)" || \
+                    warn "SELinux: port ${PORT} modify ไม่สำเร็จ"
+            else
+                semanage port -a -t http_port_t -p tcp "${PORT}" && \
+                    ok "SELinux: port ${PORT} → http_port_t (added)" || \
+                    warn "SELinux: port ${PORT} add ไม่สำเร็จ"
             fi
         done
 
+        # ตั้ง SELinux context สำหรับ app files ใน /home/
         if [[ "$APP_DIR" == /home/* ]]; then
-            chcon -R -t httpd_sys_content_t "${APP_DIR}/staticfiles/" 2>/dev/null || true
-            semanage fcontext -a -t httpd_sys_content_t "${APP_DIR}/staticfiles(/.*)?" 2>/dev/null || true
-            ok "SELinux: staticfiles context set"
+            # App files → httpd_sys_content_t
+            chcon -R -t httpd_sys_content_t "${APP_DIR}" 2>/dev/null || true
+            semanage fcontext -a -t httpd_sys_content_t "${APP_DIR}(/.*)?" 2>/dev/null || \
+            semanage fcontext -m -t httpd_sys_content_t "${APP_DIR}(/.*)?" 2>/dev/null || true
+            ok "SELinux: app directory → httpd_sys_content_t"
+
+            # venv/bin executables → bin_t (ให้ systemd execute ได้)
+            chcon -R -t bin_t "${APP_DIR}/venv/bin/" 2>/dev/null || true
+            semanage fcontext -a -t bin_t "${APP_DIR}/venv/bin(/.*)?" 2>/dev/null || \
+            semanage fcontext -m -t bin_t "${APP_DIR}/venv/bin(/.*)?" 2>/dev/null || true
+            ok "SELinux: venv/bin → bin_t"
+
+            # soc-bot venv/bin executables → bin_t
+            if [[ -d "${APP_DIR}/soc-bot/venv/bin" ]]; then
+                chcon -R -t bin_t "${APP_DIR}/soc-bot/venv/bin/" 2>/dev/null || true
+                semanage fcontext -a -t bin_t "${APP_DIR}/soc-bot/venv/bin(/.*)?" 2>/dev/null || \
+                semanage fcontext -m -t bin_t "${APP_DIR}/soc-bot/venv/bin(/.*)?" 2>/dev/null || true
+                ok "SELinux: soc-bot/venv/bin → bin_t"
+            fi
+
+            # .env files → etc_t (ให้ systemd อ่าน EnvironmentFile ได้)
+            for _env in "${APP_DIR}/.env" "${APP_DIR}/soc-bot/.env"; do
+                [[ -f "$_env" ]] && chcon -t etc_t "$_env" 2>/dev/null || true
+            done
+            ok "SELinux: .env files → etc_t"
         fi
-    else
-        info "SELinux disabled — ข้าม"
+
+        # staticfiles → httpd_sys_content_t (nginx อ่าน static files)
+        if [[ -d "${APP_DIR}/staticfiles" ]]; then
+            chcon -R -t httpd_sys_content_t "${APP_DIR}/staticfiles/" 2>/dev/null || true
+            semanage fcontext -a -t httpd_sys_content_t "${APP_DIR}/staticfiles(/.*)?" 2>/dev/null || \
+            semanage fcontext -m -t httpd_sys_content_t "${APP_DIR}/staticfiles(/.*)?" 2>/dev/null || true
+            ok "SELinux: staticfiles → httpd_sys_content_t"
+        fi
     fi
 fi
 
@@ -527,11 +643,13 @@ step "${STEP_NUM}. systemd services"
 REDIS_AFTER="redis-server.service"
 [[ "$OS_FAMILY" == "rhel" ]] && REDIS_AFTER="redis.service"
 
+PG_SERVICE_NAME="${PG_SERVICE:-postgresql}"
+
 cat > /etc/systemd/system/soc-dashboard.service <<EOF
 [Unit]
 Description=SOC Dashboard (Django/Gunicorn)
-After=network.target postgresql.service ${REDIS_AFTER}
-Wants=postgresql.service ${REDIS_AFTER}
+After=network.target ${PG_SERVICE_NAME}.service ${REDIS_AFTER}
+Wants=${PG_SERVICE_NAME}.service ${REDIS_AFTER}
 
 [Service]
 Type=simple
@@ -634,6 +752,121 @@ else
 fi
 
 # =============================================================================
+# STEP 13/12 — TheHive 5 (optional)
+# =============================================================================
+STEP_NUM=13
+[[ "$OS_FAMILY" == "debian" ]] && STEP_NUM=12
+step "${STEP_NUM}. TheHive 5 (Incident Management)"
+
+if [[ "${INSTALL_THEHIVE,,}" == "y" ]]; then
+
+    # ── Java 17 (required by TheHive 5) ──────────────────────────────────────
+    if ! java -version 2>&1 | grep -q "17\|18\|19\|20\|21"; then
+        info "ติดตั้ง Java 17..."
+        if [[ "$OS_FAMILY" == "rhel" ]]; then
+            dnf install -y java-17-openjdk-headless
+        else
+            apt-get install -y -q openjdk-17-jre-headless
+        fi
+        ok "Java 17 installed"
+    else
+        ok "Java $(java -version 2>&1 | head -1) already installed"
+    fi
+
+    # ── Download & install TheHive 5 ─────────────────────────────────────────
+    # ใช้ direct download URL (rpm.strangebee.com อาจถูก block ใน network องค์กร)
+    THEHIVE_VERSION="5.6.1"
+    THEHIVE_BASE_URL="https://thehive.download.strangebee.com/5.6"
+
+    if systemctl list-unit-files thehive.service &>/dev/null; then
+        ok "TheHive already installed"
+    else
+        info "ดาวน์โหลด TheHive ${THEHIVE_VERSION}..."
+        if [[ "$OS_FAMILY" == "rhel" ]]; then
+            THEHIVE_PKG="/tmp/thehive-${THEHIVE_VERSION}-1.noarch.rpm"
+            wget -q --show-progress \
+                -O "${THEHIVE_PKG}" \
+                "${THEHIVE_BASE_URL}/rpm/thehive-${THEHIVE_VERSION}-1.noarch.rpm" \
+                || err "ดาวน์โหลด TheHive ล้มเหลว — ตรวจสอบ internet connection"
+            # ปิด strangebee repo ชั่วคราวถ้ามี (resolve ไม่ได้)
+            dnf install -y --disablerepo=strangebee "${THEHIVE_PKG}" 2>/dev/null || \
+            dnf install -y "${THEHIVE_PKG}"
+        elif [[ "$OS_FAMILY" == "debian" ]]; then
+            THEHIVE_PKG="/tmp/thehive-${THEHIVE_VERSION}.deb"
+            wget -q --show-progress \
+                -O "${THEHIVE_PKG}" \
+                "${THEHIVE_BASE_URL}/deb/thehive_${THEHIVE_VERSION}-1_all.deb" \
+                || err "ดาวน์โหลด TheHive ล้มเหลว — ตรวจสอบ internet connection"
+            apt-get install -y -q "${THEHIVE_PKG}"
+        fi
+        ok "TheHive ${THEHIVE_VERSION} installed"
+    fi
+
+    # ── Configure TheHive (local storage — ไม่ต้องการ Cassandra/ES) ──────────
+    mkdir -p /opt/thp/thehive/{db,files,index}
+    chown -R thehive:thehive /opt/thp/thehive/ 2>/dev/null || true
+
+    cat > /etc/thehive/application.conf <<EOF
+# TheHive 5 — Local Storage Configuration
+# (suitable for small/medium deployments, no Cassandra/Elasticsearch needed)
+
+db.janusgraph {
+  storage.backend: berkeleyje
+  storage.directory: /opt/thp/thehive/db
+  berkeleyje.freeDisk: 200
+
+  index.search {
+    backend: lucene
+    directory: /opt/thp/thehive/index
+  }
+}
+
+storage {
+  provider: localfs
+  localfs.location: /opt/thp/thehive/files
+}
+
+application.baseUrl = "http://${SERVER_IP}:${THEHIVE_PORT}"
+play.http.secret.key = "$(openssl rand -hex 32)"
+EOF
+    ok "TheHive configured (local storage mode)"
+
+    # ── Firewall ──────────────────────────────────────────────────────────────
+    if [[ "$OS_FAMILY" == "rhel" ]] && systemctl is-active --quiet firewalld; then
+        firewall-cmd --permanent --add-port="${THEHIVE_PORT}/tcp" &>/dev/null || true
+        firewall-cmd --reload &>/dev/null || true
+        ok "Firewall: port ${THEHIVE_PORT} opened"
+    elif [[ "$OS_FAMILY" == "debian" ]] && command -v ufw &>/dev/null; then
+        ufw allow "${THEHIVE_PORT}/tcp" &>/dev/null || true
+    fi
+
+    # ── SELinux (RHEL) ────────────────────────────────────────────────────────
+    if [[ "$OS_FAMILY" == "rhel" ]]; then
+        SELINUX_STATUS="$(getenforce 2>/dev/null || echo Disabled)"
+        if [[ "$SELINUX_STATUS" != "Disabled" ]]; then
+            semanage port -a -t http_port_t -p tcp "${THEHIVE_PORT}" 2>/dev/null || \
+            semanage port -m -t http_port_t -p tcp "${THEHIVE_PORT}" 2>/dev/null || true
+            ok "SELinux: port ${THEHIVE_PORT} → http_port_t"
+        fi
+    fi
+
+    # ── Start service ─────────────────────────────────────────────────────────
+    systemctl enable --now thehive && \
+        ok "TheHive started on http://${SERVER_IP}:${THEHIVE_PORT}" || \
+        warn "TheHive ไม่ start — ดู: journalctl -xeu thehive"
+
+    # ── Update soc-bot .env ───────────────────────────────────────────────────
+    BOT_ENV_FILE="${APP_DIR}/soc-bot/.env"
+    if [[ -f "$BOT_ENV_FILE" ]]; then
+        sed -i "s|^THEHIVE_URL=.*|THEHIVE_URL=http://${SERVER_IP}:${THEHIVE_PORT}|" "$BOT_ENV_FILE"
+        ok "soc-bot .env: THEHIVE_URL อัปเดตแล้ว"
+    fi
+
+else
+    info "ข้าม TheHive — ติดตั้งทีหลังได้โดยรัน script นี้อีกครั้ง หรือดู: https://docs.strangebee.com"
+fi
+
+# =============================================================================
 # Done
 # =============================================================================
 echo -e "\n${GREEN}╔══════════════════════════════════════════════════════╗${NC}"
@@ -642,6 +875,8 @@ echo -e "${GREEN}╚════════════════════
 echo ""
 echo -e "  OS            : ${CYAN}${PRETTY_NAME}${NC}"
 echo -e "  Dashboard URL : ${CYAN}http://${SERVER_IP}:${DASHBOARD_PORT}${NC}"
+[[ "${INSTALL_THEHIVE,,}" == "y" ]] && \
+echo -e "  TheHive URL   : ${CYAN}http://${SERVER_IP}:${THEHIVE_PORT}${NC}"
 echo -e "  DB password   : ${YELLOW}${DB_PASS}${NC}  ← บันทึกไว้ด้วย!"
 echo ""
 echo -e "${YELLOW}สิ่งที่ต้องทำต่อ:${NC}"
@@ -665,6 +900,13 @@ echo "     journalctl -u soc-dashboard -f"
 echo "     journalctl -u soc-bot -f"
 echo ""
 echo "  4. ตั้งค่า Wazuh/Ollama/MOPH ใน Settings หน้าเว็บ"
+if [[ "${INSTALL_THEHIVE,,}" == "y" ]]; then
+echo ""
+echo "  TheHive:"
+echo "     URL: http://${SERVER_IP}:${THEHIVE_PORT}"
+echo "     Default login: admin@thehive.local / secret"
+echo "     กรอก API key ใน soc-bot/.env → THEHIVE_API_KEY"
+fi
 if [[ "$OS_FAMILY" == "rhel" ]]; then
 echo ""
 echo "  5. ถ้า 502 Bad Gateway:"

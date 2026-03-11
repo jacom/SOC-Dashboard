@@ -15,6 +15,17 @@ def incident_list(request):
     if status_filter:
         qs = qs.filter(status=status_filter)
 
+    # filter by linked vulnerability
+    vuln_filter = request.GET.get('vuln')
+    vuln_obj = None
+    if vuln_filter:
+        try:
+            from apps.vulnerabilities.models import Vulnerability
+            vuln_obj = Vulnerability.objects.get(pk=int(vuln_filter))
+            qs = qs.filter(vulnerabilities=vuln_obj)
+        except (ValueError, Exception):
+            vuln_filter = None
+
     paginator = Paginator(qs, 25)
     page = request.GET.get('page', 1)
     incidents = paginator.get_page(page)
@@ -36,6 +47,8 @@ def incident_list(request):
         'status_choices': Incident.STATUS_CHOICES,
         'status_filter': status_filter or '',
         'page_range': page_range,
+        'vuln_filter': vuln_filter,
+        'vuln_obj': vuln_obj,
     }
     return render(request, 'incidents/list.html', context)
 
@@ -43,10 +56,22 @@ def incident_list(request):
 @login_required
 def incident_detail(request, pk):
     incident = get_object_or_404(
-        Incident.objects.select_related('alert', 'alert__ai_analysis', 'alert__ai_analysis_chat'),
+        Incident.objects.select_related('alert', 'alert__ai_analysis', 'alert__ai_analysis_chat')
+                        .prefetch_related('vulnerabilities'),
         pk=pk,
     )
-    return render(request, 'incidents/detail.html', {'incident': incident})
+    # Suggest vulns with same agent_ip that aren't already linked
+    suggested_vulns = []
+    if incident.alert and incident.alert.agent_ip:
+        linked_ids = incident.vulnerabilities.values_list('id', flat=True)
+        from apps.vulnerabilities.models import Vulnerability
+        suggested_vulns = Vulnerability.objects.filter(
+            agent_ip=incident.alert.agent_ip,
+        ).exclude(id__in=linked_ids).order_by('-discovered_at')[:10]
+    return render(request, 'incidents/detail.html', {
+        'incident': incident,
+        'suggested_vulns': suggested_vulns,
+    })
 
 
 @login_required
@@ -84,6 +109,12 @@ def incident_create(request):
                 thehive_url=thehive_url,
                 approved_by=request.user,
             )
+            try:
+                from apps.core.audit import audit
+                audit(request, 'incident_create', 'Incident', incident.pk,
+                      f'Created {thehive_case_id}: {title[:80]}')
+            except Exception:
+                pass
             messages.success(request, f'Incident {thehive_case_id} created.')
             return redirect('incidents:detail', pk=incident.pk)
 
@@ -140,6 +171,7 @@ def incident_edit(request, pk):
             errors['title'] = 'Title is required.'
 
         if not errors:
+            old_status = incident.status
             incident.alert_id = alert_id
             incident.thehive_case_id = thehive_case_id
             incident.title = title
@@ -148,6 +180,22 @@ def incident_edit(request, pk):
             incident.thehive_url = thehive_url
             incident.approved_by = request.user
             incident.save()
+            # Email asset owner when status changes to InProgress
+            if old_status != 'InProgress' and status == 'InProgress':
+                try:
+                    from .notifier import notify_incident_inprogress
+                    notify_incident_inprogress(incident)
+                except Exception:
+                    pass
+            try:
+                from apps.core.audit import audit
+                detail = f'{thehive_case_id}: {title[:60]}'
+                if old_status != status:
+                    detail += f' | status: {old_status} → {status}'
+                audit(request, 'incident_status' if old_status != status else 'incident_edit',
+                      'Incident', incident.pk, detail)
+            except Exception:
+                pass
             messages.success(request, f'Incident {thehive_case_id} updated.')
             return redirect('incidents:detail', pk=incident.pk)
 
@@ -192,8 +240,64 @@ def incident_delete(request, pk):
     incident = get_object_or_404(Incident, pk=pk)
     case_id = incident.thehive_case_id
     incident.delete()
+    try:
+        from apps.core.audit import audit
+        audit(request, 'incident_delete', 'Incident', pk, f'Deleted {case_id}')
+    except Exception:
+        pass
     messages.success(request, f'Incident {case_id} deleted.')
     return redirect('incidents:list')
+
+
+@login_required
+@require_POST
+def bulk_action(request):
+    from django.http import JsonResponse
+    action = request.POST.get('action', '')
+    pks_raw = request.POST.getlist('pks')
+    try:
+        pks = [int(p) for p in pks_raw if p.strip().isdigit()]
+    except ValueError:
+        return JsonResponse({'ok': False, 'error': 'Invalid pk list'})
+
+    if not pks:
+        return JsonResponse({'ok': False, 'error': 'No incidents selected'})
+
+    qs = Incident.objects.filter(pk__in=pks)
+
+    if action == 'delete':
+        count = qs.count()
+        qs.delete()
+        return JsonResponse({'ok': True, 'action': 'delete', 'count': count})
+
+    elif action == 'update_status':
+        new_status = request.POST.get('status', '')
+        valid = [s for s, _ in Incident.STATUS_CHOICES]
+        if new_status not in valid:
+            return JsonResponse({'ok': False, 'error': f'Invalid status: {new_status}'})
+        from django.utils import timezone
+        # Collect incidents that will change to InProgress before bulk update
+        to_notify = []
+        if new_status == 'InProgress':
+            to_notify = list(qs.exclude(status='InProgress').select_related('alert'))
+        count = qs.update(status=new_status, updated_at=timezone.now())
+        # Email asset owners (fire-and-forget)
+        if to_notify:
+            try:
+                from .notifier import notify_incident_inprogress
+                for inc in to_notify:
+                    notify_incident_inprogress(inc)
+            except Exception:
+                pass
+        try:
+            from apps.core.audit import audit
+            audit(request, 'incident_status', 'Incident', ','.join(map(str, pks)),
+                  f'Bulk status → {new_status} ({count} incidents)')
+        except Exception:
+            pass
+        return JsonResponse({'ok': True, 'action': 'update_status', 'count': count, 'status': new_status})
+
+    return JsonResponse({'ok': False, 'error': f'Unknown action: {action}'})
 
 @login_required
 @require_POST
@@ -281,3 +385,48 @@ def export_incidents_csv(request):
             inc.thehive_url or '',
         ])
     return response
+
+
+@login_required
+@require_POST
+def vuln_link(request, pk):
+    """Link or unlink a Vulnerability to an Incident."""
+    from django.http import JsonResponse
+    from apps.vulnerabilities.models import Vulnerability
+    incident = get_object_or_404(Incident, pk=pk)
+    vuln_id = request.POST.get('vuln_id', '').strip()
+    action = request.POST.get('action', 'link')
+    if not vuln_id:
+        return JsonResponse({'ok': False, 'error': 'vuln_id required'}, status=400)
+    vuln = get_object_or_404(Vulnerability, pk=vuln_id)
+    if action == 'unlink':
+        incident.vulnerabilities.remove(vuln)
+        label = 'unlinked'
+    else:
+        incident.vulnerabilities.add(vuln)
+        label = 'linked'
+    try:
+        from apps.core.audit import audit
+        audit(request, 'incident_edit', 'Incident', pk,
+              f'{label} CVE {vuln.cve_id or vuln.pk} ↔ Incident {incident.thehive_case_id}')
+    except Exception:
+        pass
+    return JsonResponse({'ok': True, 'action': label, 'vuln_id': vuln.pk,
+                         'cve_id': vuln.cve_id, 'title': vuln.title[:80],
+                         'severity': vuln.severity, 'status': vuln.status})
+
+
+@login_required
+def vuln_search(request, pk):
+    """AJAX search vulns to link — excludes already-linked ones."""
+    from django.http import JsonResponse
+    from apps.vulnerabilities.models import Vulnerability
+    incident = get_object_or_404(Incident, pk=pk)
+    q = request.GET.get('q', '').strip()
+    linked_ids = list(incident.vulnerabilities.values_list('id', flat=True))
+    qs = Vulnerability.objects.exclude(id__in=linked_ids)
+    if q:
+        from django.db.models import Q
+        qs = qs.filter(Q(cve_id__icontains=q) | Q(title__icontains=q) | Q(agent_ip__icontains=q))
+    results = list(qs.values('id', 'cve_id', 'title', 'severity', 'status', 'agent_ip')[:20])
+    return JsonResponse({'ok': True, 'results': results})

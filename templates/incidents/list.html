@@ -2,7 +2,30 @@
 
 {% block title %}Incidents - SOC Dashboard{% endblock %}
 
+{% block extra_head %}
+<style>
+.bulk-bar { display:none; background:#1c2128; border:1px solid #30363d; border-radius:6px; padding:0.5rem 0.75rem; }
+.bulk-bar.visible { display:flex; }
+</style>
+{% endblock %}
+
 {% block content %}
+{% if vuln_obj %}
+<div class="alert d-flex align-items-center gap-3 mb-3 py-2" style="background:#1a1100; border:1px solid #6e4c00; border-radius:8px;">
+    <i class="bi bi-shield-exclamation text-warning fs-5"></i>
+    <div class="flex-grow-1">
+        <span class="text-muted small">กรอง Incidents ที่เชื่อมกับ CVE:</span><br>
+        <strong class="text-warning">{{ vuln_obj.cve_id|default:vuln_obj.title }}</strong>
+        <span class="text-muted ms-2 small">{{ vuln_obj.title|truncatechars:60 }}</span>
+    </div>
+    <a href="/vulnerabilities/{{ vuln_obj.pk }}/" class="btn btn-sm btn-outline-warning">
+        <i class="bi bi-arrow-left me-1"></i>กลับหน้า CVE
+    </a>
+    <a href="/incidents/" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-x-lg me-1"></i>ล้าง filter
+    </a>
+</div>
+{% endif %}
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h4 class="mb-0"><i class="bi bi-folder2-open me-2 text-info"></i>TheHive Incidents</h4>
     <div class="d-flex align-items-center gap-2">
@@ -44,16 +67,39 @@
     </div>
 </div>
 
+<!-- Bulk action bar (shown when items selected) -->
+<div id="bulk-bar" class="bulk-bar align-items-center gap-3 mb-2">
+    <span id="bulk-count" class="text-info" style="font-size:0.88rem;"></span>
+    <div class="d-flex gap-2 align-items-center">
+        <select id="bulk-status-select" class="form-select form-select-sm" style="width:auto;">
+            {% for val, label in status_choices %}
+            <option value="{{ val }}">{{ label }}</option>
+            {% endfor %}
+        </select>
+        <button class="btn btn-sm btn-outline-warning" onclick="bulkUpdateStatus()">
+            <i class="bi bi-arrow-repeat me-1"></i>Update Status
+        </button>
+    </div>
+    <button class="btn btn-sm btn-outline-danger" onclick="bulkDelete()">
+        <i class="bi bi-trash me-1"></i>Delete Selected
+    </button>
+    <span id="bulk-result" style="font-size:0.82rem;"></span>
+</div>
+
 <div class="card">
     <div class="card-body p-0">
         <div class="table-responsive">
             <table class="table table-hover mb-0">
                 <thead>
                     <tr>
+                        <th style="width:36px;">
+                            <input type="checkbox" id="select-all" class="form-check-input" title="Select all">
+                        </th>
                         <th>Case ID</th>
                         <th>Title</th>
                         <th>Status</th>
                         <th>Severity</th>
+                        <th>Source IP</th>
                         <th>Chat AI</th>
                         <th>Related Alert</th>
                         <th>Approved By</th>
@@ -61,11 +107,14 @@
                         <th></th>
                     </tr>
                 </thead>
-                <tbody>
+                <tbody id="incident-tbody">
                     {% for incident in incidents %}
-                    <tr>
+                    <tr data-pk="{{ incident.pk }}">
+                        <td>
+                            <input type="checkbox" class="form-check-input row-check" value="{{ incident.pk }}">
+                        </td>
                         <td><small class="text-muted">{{ incident.thehive_case_id }}</small></td>
-                        <td>{{ incident.title|truncatechars:70 }}</td>
+                        <td>{{ incident.title|truncatechars:60 }}</td>
                         <td>
                             {% if incident.status == 'New' %}
                                 <span class="badge bg-primary">New</span>
@@ -81,6 +130,13 @@
                             {% if incident.severity %}
                                 <span class="badge badge-{{ incident.severity }}">{{ incident.severity }}</span>
                             {% else %}—{% endif %}
+                        </td>
+                        <td>
+                            {% if incident.alert.agent_ip %}
+                                <code style="font-size:0.8rem; color:#79c0ff;">{{ incident.alert.agent_ip }}</code>
+                            {% else %}
+                                <span class="text-muted">—</span>
+                            {% endif %}
                         </td>
                         <td>
                             {% with chat=incident.alert.ai_analysis_chat %}
@@ -141,7 +197,7 @@
                     </tr>
                     {% empty %}
                     <tr>
-                        <td colspan="9" class="text-center text-muted py-5">
+                        <td colspan="11" class="text-center text-muted py-5">
                             <i class="bi bi-folder2 display-6 d-block mb-2"></i>
                             No incidents found.
                         </td>
@@ -191,14 +247,14 @@
                 <h5 class="modal-title"><i class="bi bi-exclamation-triangle text-danger me-2"></i>Confirm Delete</h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
-            <div class="modal-body">
+            <div class="modal-body" id="delete-modal-body">
                 Delete incident <strong id="delete-case-id"></strong>? This action cannot be undone.
             </div>
             <div class="modal-footer" style="border-top:1px solid #30363d;">
                 <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
                 <form id="delete-form" method="post">
                     {% csrf_token %}
-                    <button type="submit" class="btn btn-danger">Delete</button>
+                    <button type="submit" class="btn btn-danger" id="delete-confirm-btn">Delete</button>
                 </form>
             </div>
         </div>
@@ -208,6 +264,120 @@
 
 {% block extra_scripts %}
 <script>
+const csrfToken = '{{ csrf_token }}';
+
+// ─── Checkbox selection ───────────────────────────────────────────────────────
+const selectAll = document.getElementById('select-all');
+const bulkBar   = document.getElementById('bulk-bar');
+const bulkCount = document.getElementById('bulk-count');
+
+function getCheckedPks() {
+    return Array.from(document.querySelectorAll('.row-check:checked')).map(cb => cb.value);
+}
+
+function updateBulkBar() {
+    const pks = getCheckedPks();
+    if (pks.length > 0) {
+        bulkCount.textContent = `เลือก ${pks.length} รายการ`;
+        bulkBar.classList.add('visible');
+    } else {
+        bulkBar.classList.remove('visible');
+        document.getElementById('bulk-result').innerHTML = '';
+    }
+}
+
+selectAll.addEventListener('change', function () {
+    document.querySelectorAll('.row-check').forEach(cb => { cb.checked = this.checked; });
+    updateBulkBar();
+});
+
+document.querySelectorAll('.row-check').forEach(cb => {
+    cb.addEventListener('change', function () {
+        const all = document.querySelectorAll('.row-check');
+        const checked = document.querySelectorAll('.row-check:checked');
+        selectAll.indeterminate = checked.length > 0 && checked.length < all.length;
+        selectAll.checked = checked.length === all.length && all.length > 0;
+        updateBulkBar();
+    });
+});
+
+// ─── Bulk Delete ──────────────────────────────────────────────────────────────
+async function bulkDelete() {
+    const pks = getCheckedPks();
+    if (!pks.length) return;
+    if (!confirm(`ลบ ${pks.length} incident ที่เลือก? ไม่สามารถกู้คืนได้`)) return;
+
+    const resultEl = document.getElementById('bulk-result');
+    resultEl.innerHTML = '<span class="text-muted"><span class="spinner-border spinner-border-sm me-1"></span>กำลังลบ…</span>';
+
+    const fd = new FormData();
+    fd.append('action', 'delete');
+    pks.forEach(pk => fd.append('pks', pk));
+
+    try {
+        const resp = await fetch('/incidents/bulk/', { method: 'POST', headers: {'X-CSRFToken': csrfToken}, body: fd });
+        const data = await resp.json();
+        if (data.ok) {
+            resultEl.innerHTML = `<span class="text-success"><i class="bi bi-check-circle-fill me-1"></i>ลบ ${data.count} รายการ</span>`;
+            // Remove deleted rows from table
+            pks.forEach(pk => {
+                const row = document.querySelector(`tr[data-pk="${pk}"]`);
+                if (row) row.remove();
+            });
+            selectAll.checked = false;
+            selectAll.indeterminate = false;
+            updateBulkBar();
+        } else {
+            resultEl.innerHTML = `<span class="text-danger">${data.error}</span>`;
+        }
+    } catch (e) {
+        resultEl.innerHTML = `<span class="text-danger">Request failed</span>`;
+    }
+}
+
+// ─── Bulk Update Status ───────────────────────────────────────────────────────
+const STATUS_BADGE = {
+    'New': '<span class="badge bg-primary">New</span>',
+    'InProgress': '<span class="badge bg-warning text-dark">In Progress</span>',
+    'Resolved': '<span class="badge bg-success">Resolved</span>',
+    'Closed': '<span class="badge bg-secondary">Closed</span>',
+};
+
+async function bulkUpdateStatus() {
+    const pks = getCheckedPks();
+    if (!pks.length) return;
+    const newStatus = document.getElementById('bulk-status-select').value;
+
+    const resultEl = document.getElementById('bulk-result');
+    resultEl.innerHTML = '<span class="text-muted"><span class="spinner-border spinner-border-sm me-1"></span>กำลังอัปเดต…</span>';
+
+    const fd = new FormData();
+    fd.append('action', 'update_status');
+    fd.append('status', newStatus);
+    pks.forEach(pk => fd.append('pks', pk));
+
+    try {
+        const resp = await fetch('/incidents/bulk/', { method: 'POST', headers: {'X-CSRFToken': csrfToken}, body: fd });
+        const data = await resp.json();
+        if (data.ok) {
+            resultEl.innerHTML = `<span class="text-success"><i class="bi bi-check-circle-fill me-1"></i>อัปเดต ${data.count} รายการ → ${data.status}</span>`;
+            // Update badge in each selected row
+            pks.forEach(pk => {
+                const row = document.querySelector(`tr[data-pk="${pk}"]`);
+                if (row) {
+                    const statusCell = row.querySelectorAll('td')[3];  // 4th td (0=checkbox,1=caseid,2=title,3=status)
+                    if (statusCell) statusCell.innerHTML = STATUS_BADGE[newStatus] || `<span class="badge bg-secondary">${newStatus}</span>`;
+                }
+            });
+        } else {
+            resultEl.innerHTML = `<span class="text-danger">${data.error}</span>`;
+        }
+    } catch (e) {
+        resultEl.innerHTML = `<span class="text-danger">Request failed</span>`;
+    }
+}
+
+// ─── Sync TheHive ─────────────────────────────────────────────────────────────
 async function syncTheHive() {
     const btn = document.getElementById('sync-btn');
     const resultEl = document.getElementById('sync-result');
@@ -217,7 +387,7 @@ async function syncTheHive() {
     try {
         const resp = await fetch('/incidents/sync-thehive/', {
             method: 'POST',
-            headers: {'X-CSRFToken': '{{ csrf_token }}'},
+            headers: {'X-CSRFToken': csrfToken},
         });
         const data = await resp.json();
         if (data.ok) {
@@ -234,16 +404,19 @@ async function syncTheHive() {
     }
 }
 
+// ─── Single Delete ────────────────────────────────────────────────────────────
 function confirmDelete(pk, caseId) {
     document.getElementById('delete-case-id').textContent = caseId;
+    document.getElementById('delete-modal-body').innerHTML =
+        `Delete incident <strong>${caseId}</strong>? This action cannot be undone.`;
     document.getElementById('delete-form').action = '/incidents/' + pk + '/delete/';
     new bootstrap.Modal(document.getElementById('deleteModal')).show();
 }
 
+// ─── Chat AI ──────────────────────────────────────────────────────────────────
 function sendChatAI(alertId, btn) {
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
-    const csrfToken = (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '';
     fetch('/alerts/' + alertId + '/analyze-chat/', {
         method: 'POST',
         headers: {'X-CSRFToken': csrfToken},

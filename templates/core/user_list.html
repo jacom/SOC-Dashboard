@@ -1,0 +1,396 @@
+{% extends "base.html" %}
+{% block title %}จัดการผู้ใช้งาน — SOC Dashboard{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb" class="mb-3">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="/">Dashboard</a></li>
+        <li class="breadcrumb-item active">จัดการผู้ใช้งาน</li>
+    </ol>
+</nav>
+
+<div class="d-flex align-items-center justify-content-between mb-4">
+    <h4 class="mb-0"><i class="bi bi-people me-2 text-info"></i>จัดการผู้ใช้งาน</h4>
+    <button class="btn btn-primary btn-sm" onclick="openAddModal()">
+        <i class="bi bi-person-plus me-1"></i>เพิ่มผู้ใช้
+    </button>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr>
+                    <th style="width:3rem;">#</th>
+                    <th>Username</th>
+                    <th>ชื่อ-นามสกุล</th>
+                    <th>Email</th>
+                    <th>Role</th>
+                    <th>แผนก</th>
+                    <th>สถานะ</th>
+                    <th>2FA</th>
+                    <th style="width:11rem;">Actions</th>
+                </tr>
+            </thead>
+            <tbody id="user-table-body">
+                {% for user in users %}
+                <tr id="row-{{ user.pk }}">
+                    <td class="text-muted">{{ forloop.counter }}</td>
+                    <td>
+                        <i class="bi bi-person-circle me-1 text-muted"></i>
+                        <strong>{{ user.username }}</strong>
+                        {% if user.pk == request.user.pk %}
+                        <span class="badge bg-info ms-1" style="font-size:0.65rem;">คุณ</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if user.get_full_name %}{{ user.get_full_name }}{% else %}<span class="text-muted">—</span>{% endif %}
+                    </td>
+                    <td>
+                        {% if user.email %}{{ user.email }}{% else %}<span class="text-muted">—</span>{% endif %}
+                    </td>
+                    <td>
+                        {% with role=user.profile.role %}
+                        {% if role == 'admin' %}
+                        <span class="badge bg-danger">Administrator</span>
+                        {% elif role == 'analyst' %}
+                        <span class="badge bg-primary">Analyst</span>
+                        {% else %}
+                        <span class="badge bg-secondary">Viewer</span>
+                        {% endif %}
+                        {% endwith %}
+                    </td>
+                    <td>
+                        {% if user.profile.department %}{{ user.profile.department }}{% else %}<span class="text-muted">—</span>{% endif %}
+                    </td>
+                    <td>
+                        {% if user.is_active %}
+                        <span class="badge bg-success">ใช้งาน</span>
+                        {% else %}
+                        <span class="badge bg-secondary">ระงับ</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if user.pk in otp_users %}
+                        <span class="badge bg-success" title="เปิดใช้ 2FA"><i class="bi bi-shield-check me-1"></i>เปิด</span>
+                        {% else %}
+                        <span class="badge bg-secondary" title="ยังไม่ตั้งค่า 2FA"><i class="bi bi-shield me-1"></i>ปิด</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <div class="btn-group btn-group-sm">
+                            <button class="btn btn-outline-secondary" title="แก้ไข" onclick="openEditModal({{ user.pk }})">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                            <button class="btn btn-outline-{% if user.is_active %}warning{% else %}success{% endif %}"
+                                    title="{% if user.is_active %}ระงับ{% else %}เปิดใช้{% endif %}"
+                                    {% if user.pk == request.user.pk %}disabled{% endif %}
+                                    onclick="toggleActive({{ user.pk }})">
+                                <i class="bi bi-{% if user.is_active %}pause-circle{% else %}play-circle{% endif %}"></i>
+                            </button>
+                            {% if user.pk in otp_users %}
+                            <button class="btn btn-outline-warning" title="รีเซ็ต 2FA"
+                                    {% if user.pk == request.user.pk %}disabled{% endif %}
+                                    onclick="reset2FA({{ user.pk }}, '{{ user.username }}')">
+                                <i class="bi bi-shield-x"></i>
+                            </button>
+                            {% endif %}
+                            <button class="btn btn-outline-danger" title="ลบ"
+                                    {% if user.pk == request.user.pk %}disabled{% endif %}
+                                    onclick="deleteUser({{ user.pk }}, '{{ user.username }}')">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="9" class="text-center text-muted py-4">ไม่พบผู้ใช้งาน</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Add/Edit Modal -->
+<div class="modal fade" id="userModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content" style="background:#161b22; border:1px solid #30363d;">
+            <div class="modal-header" style="border-bottom:1px solid #30363d;">
+                <h5 class="modal-title" id="modalTitle"><i class="bi bi-person-plus me-2"></i>เพิ่มผู้ใช้</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="modal-error" class="alert alert-danger d-none"></div>
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label small">Username <span class="text-danger">*</span></label>
+                        <input type="text" id="f-username" class="form-control form-control-sm" placeholder="username">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label small">Email</label>
+                        <input type="email" id="f-email" class="form-control form-control-sm" placeholder="email@example.com">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label small">ชื่อ</label>
+                        <input type="text" id="f-first-name" class="form-control form-control-sm" placeholder="ชื่อ">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label small">นามสกุล</label>
+                        <input type="text" id="f-last-name" class="form-control form-control-sm" placeholder="นามสกุล">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label small">Password <span class="text-danger" id="pw-required">*</span></label>
+                        <div class="input-group input-group-sm">
+                            <input type="password" id="f-password" class="form-control form-control-sm" placeholder="รหัสผ่าน">
+                            <button class="btn btn-outline-secondary" type="button" id="pw-eye-btn" onclick="togglePwVisibility()">
+                                <i class="bi bi-eye" id="pw-eye-icon"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label small">Role</label>
+                        <select id="f-role" class="form-select form-select-sm">
+                            <option value="analyst">Analyst</option>
+                            <option value="viewer">Viewer</option>
+                            <option value="admin">Administrator</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label small">แผนก</label>
+                        <input type="text" id="f-department" class="form-control form-control-sm" placeholder="แผนก / หน่วยงาน">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label small">เบอร์โทร</label>
+                        <input type="text" id="f-phone" class="form-control form-control-sm" placeholder="เบอร์โทรศัพท์">
+                    </div>
+                    <div class="col-12" id="active-row" style="display:none;">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="f-is-active" checked>
+                            <label class="form-check-label small" for="f-is-active">เปิดใช้งาน (Active)</label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer" style="border-top:1px solid #30363d;">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">ยกเลิก</button>
+                <button type="button" class="btn btn-primary btn-sm" onclick="saveUser()">
+                    <i class="bi bi-save me-1"></i>บันทึก
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Confirm Delete Modal -->
+<div class="modal fade" id="deleteModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content" style="background:#161b22; border:1px solid #30363d;">
+            <div class="modal-header" style="border-bottom:1px solid #30363d;">
+                <h5 class="modal-title text-danger"><i class="bi bi-exclamation-triangle me-2"></i>ยืนยันการลบ</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                ต้องการลบผู้ใช้ <strong id="delete-username"></strong> ใช่หรือไม่? การกระทำนี้ไม่สามารถย้อนกลับได้
+            </div>
+            <div class="modal-footer" style="border-top:1px solid #30363d;">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">ยกเลิก</button>
+                <button type="button" class="btn btn-danger btn-sm" id="confirm-delete-btn">
+                    <i class="bi bi-trash me-1"></i>ลบ
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const csrfToken = () => (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '';
+let editingPk = null;
+let userModal = null;
+let deleteModal = null;
+
+document.addEventListener('DOMContentLoaded', function () {
+    userModal = new bootstrap.Modal(document.getElementById('userModal'));
+    deleteModal = new bootstrap.Modal(document.getElementById('deleteModal'));
+});
+
+function openAddModal() {
+    editingPk = null;
+    document.getElementById('modalTitle').innerHTML = '<i class="bi bi-person-plus me-2"></i>เพิ่มผู้ใช้';
+    document.getElementById('f-username').disabled = false;
+    document.getElementById('f-username').value = '';
+    document.getElementById('f-email').value = '';
+    document.getElementById('f-first-name').value = '';
+    document.getElementById('f-last-name').value = '';
+    document.getElementById('f-password').value = '';
+    document.getElementById('f-password').placeholder = 'รหัสผ่าน';
+    document.getElementById('f-role').value = 'analyst';
+    document.getElementById('f-department').value = '';
+    document.getElementById('f-phone').value = '';
+    document.getElementById('pw-required').style.display = 'inline';
+    document.getElementById('active-row').style.display = 'none';
+    document.getElementById('modal-error').classList.add('d-none');
+    userModal.show();
+}
+
+function openEditModal(pk) {
+    editingPk = pk;
+    document.getElementById('modalTitle').innerHTML = '<i class="bi bi-pencil me-2"></i>แก้ไขผู้ใช้';
+    document.getElementById('f-password').placeholder = 'ไม่เปลี่ยนถ้าเว้นว่าง';
+    document.getElementById('f-password').value = '';
+    document.getElementById('pw-required').style.display = 'none';
+    document.getElementById('active-row').style.display = 'block';
+    document.getElementById('modal-error').classList.add('d-none');
+
+    fetch(`/users/${pk}/`, {headers: {'X-CSRFToken': csrfToken()}})
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById('f-username').value = data.username;
+            document.getElementById('f-username').disabled = true;
+            document.getElementById('f-email').value = data.email || '';
+            document.getElementById('f-first-name').value = data.first_name || '';
+            document.getElementById('f-last-name').value = data.last_name || '';
+            document.getElementById('f-role').value = data.role || 'analyst';
+            document.getElementById('f-department').value = data.department || '';
+            document.getElementById('f-phone').value = data.phone || '';
+            document.getElementById('f-is-active').checked = data.is_active;
+            userModal.show();
+        })
+        .catch(() => showToast('ไม่สามารถโหลดข้อมูลผู้ใช้ได้', 'danger'));
+}
+
+function saveUser() {
+    const payload = {
+        username:   document.getElementById('f-username').value.trim(),
+        email:      document.getElementById('f-email').value.trim(),
+        first_name: document.getElementById('f-first-name').value.trim(),
+        last_name:  document.getElementById('f-last-name').value.trim(),
+        password:   document.getElementById('f-password').value,
+        role:       document.getElementById('f-role').value,
+        department: document.getElementById('f-department').value.trim(),
+        phone:      document.getElementById('f-phone').value.trim(),
+    };
+
+    let url, method;
+    if (editingPk) {
+        payload.is_active = document.getElementById('f-is-active').checked;
+        url = `/users/${editingPk}/edit/`;
+        method = 'POST';
+    } else {
+        url = '/users/add/';
+        method = 'POST';
+    }
+
+    fetch(url, {
+        method,
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken()},
+        body: JSON.stringify(payload),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.ok) {
+            userModal.hide();
+            location.reload();
+        } else {
+            const errEl = document.getElementById('modal-error');
+            errEl.textContent = data.error || 'เกิดข้อผิดพลาด';
+            errEl.classList.remove('d-none');
+        }
+    })
+    .catch(() => {
+        const errEl = document.getElementById('modal-error');
+        errEl.textContent = 'เกิดข้อผิดพลาดในการเชื่อมต่อ';
+        errEl.classList.remove('d-none');
+    });
+}
+
+function deleteUser(pk, username) {
+    document.getElementById('delete-username').textContent = username;
+    document.getElementById('confirm-delete-btn').onclick = function () {
+        fetch(`/users/${pk}/delete/`, {
+            method: 'POST',
+            headers: {'X-CSRFToken': csrfToken()},
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.ok) {
+                deleteModal.hide();
+                const row = document.getElementById(`row-${pk}`);
+                if (row) row.remove();
+                showToast('ลบผู้ใช้สำเร็จ', 'success');
+            } else {
+                deleteModal.hide();
+                showToast(data.error || 'เกิดข้อผิดพลาด', 'danger');
+            }
+        })
+        .catch(() => showToast('เกิดข้อผิดพลาดในการเชื่อมต่อ', 'danger'));
+    };
+    deleteModal.show();
+}
+
+function toggleActive(pk) {
+    fetch(`/users/${pk}/toggle/`, {
+        method: 'POST',
+        headers: {'X-CSRFToken': csrfToken()},
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.ok) {
+            location.reload();
+        } else {
+            showToast(data.error || 'เกิดข้อผิดพลาด', 'danger');
+        }
+    })
+    .catch(() => showToast('เกิดข้อผิดพลาดในการเชื่อมต่อ', 'danger'));
+}
+
+function togglePwVisibility() {
+    const inp = document.getElementById('f-password');
+    const icon = document.getElementById('pw-eye-icon');
+    if (inp.type === 'password') {
+        inp.type = 'text';
+        icon.className = 'bi bi-eye-slash';
+    } else {
+        inp.type = 'password';
+        icon.className = 'bi bi-eye';
+    }
+}
+
+function reset2FA(pk, username) {
+    if (!confirm(`รีเซ็ต 2FA ของ "${username}" ใช่หรือไม่?\nผู้ใช้จะต้องสแกน QR Code ใหม่ในการ login ครั้งต่อไป`)) return;
+    fetch('/2fa/disable/', {
+        method: 'POST',
+        headers: {'X-CSRFToken': csrfToken(), 'Content-Type': 'application/x-www-form-urlencoded'},
+        body: `user_pk=${pk}`,
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.ok) {
+            showToast(`รีเซ็ต 2FA ของ ${username} สำเร็จ`, 'success');
+            setTimeout(() => location.reload(), 1000);
+        } else {
+            showToast(data.error || 'เกิดข้อผิดพลาด', 'danger');
+        }
+    })
+    .catch(() => showToast('เกิดข้อผิดพลาดในการเชื่อมต่อ', 'danger'));
+}
+
+function showToast(message, type) {
+    let container = document.getElementById('toast-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'toast-container';
+        document.body.appendChild(container);
+    }
+    const toast = document.createElement('div');
+    toast.className = `alert alert-${type} alert-dismissible fade show shadow`;
+    toast.style.cssText = 'min-width:250px;';
+    toast.innerHTML = `${message}<button type="button" class="btn-close" data-bs-dismiss="alert"></button>`;
+    container.appendChild(toast);
+    setTimeout(() => toast.remove(), 4000);
+}
+</script>
+{% endblock %}

@@ -1,0 +1,209 @@
+{% extends 'base.html' %}
+{% block title %}Asset: {{ asset.agent_ip }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb mb-1" style="font-size:0.85rem;">
+                <li class="breadcrumb-item"><a href="/" style="color:#58a6ff;">Dashboard</a></li>
+                <li class="breadcrumb-item"><a href="{% url 'assets:list' %}" style="color:#58a6ff;">Asset Register</a></li>
+                <li class="breadcrumb-item active" style="color:#8b949e;">{{ asset.agent_ip }}</li>
+            </ol>
+        </nav>
+        <h4 class="mb-0">
+            <i class="bi bi-pc-display me-2" style="color:#58a6ff;"></i>
+            {{ asset.agent_name|default:asset.agent_ip }}
+            <span class="badge bg-{{ asset.criticality_color }} ms-2" style="font-size:0.7rem;">{{ asset.criticality }}</span>
+        </h4>
+    </div>
+    <button class="btn btn-sm btn-outline-primary" onclick="openEditModal({{ asset.pk }})">
+        <i class="bi bi-pencil me-1"></i>แก้ไข
+    </button>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-header"><i class="bi bi-info-circle me-2" style="color:#58a6ff;"></i>ข้อมูล Asset</div>
+            <div class="card-body">
+                <table class="table table-sm mb-0" style="font-size:0.88rem;">
+                    <tr><td class="text-muted" style="width:140px;">Agent IP</td><td><code style="color:#79c0ff;">{{ asset.agent_ip }}</code></td></tr>
+                    <tr><td class="text-muted">Agent Name</td><td>{{ asset.agent_name|default:"—" }}</td></tr>
+                    <tr><td class="text-muted">Hostname</td><td>{{ asset.hostname|default:"—" }}</td></tr>
+                    <tr><td class="text-muted">ประเภท</td><td>{{ asset.get_asset_type_display }}</td></tr>
+                    <tr><td class="text-muted">Physical/VM</td><td>{{ asset.get_machine_type_display }}</td></tr>
+                    <tr><td class="text-muted">Criticality</td><td><span class="badge bg-{{ asset.criticality_color }}">{{ asset.criticality }}</span></td></tr>
+                    <tr><td class="text-muted">ผู้ดูแล</td><td>{{ asset.owner|default:"—" }}</td></tr>
+                    <tr><td class="text-muted">แผนก</td><td>{{ asset.department|default:"—" }}</td></tr>
+                    <tr><td class="text-muted">Location</td><td>{{ asset.location|default:"—" }}</td></tr>
+                    <tr><td class="text-muted">บันทึกล่าสุด</td><td>{{ asset.updated_at|date:"d M Y H:i" }}</td></tr>
+                </table>
+                {% if asset.image %}
+                <hr style="border-color:#30363d;">
+                <div class="text-muted small mb-1">รูปภาพ</div>
+                <img src="{{ asset.image.url }}" alt="{{ asset.agent_ip }}"
+                     style="max-width:100%; max-height:220px; border-radius:8px; border:1px solid #30363d; object-fit:cover;">
+                {% endif %}
+                {% if asset.notes %}
+                <hr style="border-color:#30363d;">
+                <small class="text-muted">{{ asset.notes }}</small>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-header"><i class="bi bi-graph-up me-2" style="color:#f0883e;"></i>Alert Summary (20 ล่าสุด)</div>
+            <div class="card-body">
+                <div class="d-flex gap-2 flex-wrap mb-2">
+                    <span class="badge bg-danger">Critical: {{ count_critical }}</span>
+                    <span class="badge bg-warning text-dark">High: {{ count_high }}</span>
+                    <span class="badge bg-info text-dark">Medium: {{ count_medium }}</span>
+                    <span class="badge bg-secondary">Low: {{ count_low }}</span>
+                </div>
+                <p class="text-muted small mb-0">แสดง {{ recent_alerts|length }} alerts ล่าสุด (ทั้งหมด {{ count_critical|add:count_high|add:count_medium|add:count_low }} alerts)</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Recent Alerts Table -->
+<div class="card">
+    <div class="card-header"><i class="bi bi-bell me-2" style="color:#f0883e;"></i>Recent Alerts</div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0" style="font-size:0.85rem;">
+                <thead>
+                    <tr>
+                        <th>เวลา</th>
+                        <th>Rule ID</th>
+                        <th>คำอธิบาย</th>
+                        <th>Severity</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for alert in recent_alerts %}
+                    <tr>
+                        <td class="text-muted">{{ alert.timestamp|date:"d M H:i" }}</td>
+                        <td><code style="color:#79c0ff;">{{ alert.rule_id }}</code></td>
+                        <td>{{ alert.rule_description|truncatechars:60 }}</td>
+                        <td>
+                            {% if alert.severity == 'CRITICAL' %}<span class="badge bg-danger">CRITICAL</span>
+                            {% elif alert.severity == 'HIGH' %}<span class="badge bg-warning text-dark">HIGH</span>
+                            {% elif alert.severity == 'MEDIUM' %}<span class="badge bg-info text-dark">MEDIUM</span>
+                            {% else %}<span class="badge bg-secondary">{{ alert.severity }}</span>{% endif %}
+                        </td>
+                        <td><a href="{% url 'alerts:detail' alert.pk %}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-eye"></i></a></td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="5" class="text-center text-muted py-4">ไม่พบ alert</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Modal -->
+<div class="modal fade" id="assetModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content" style="background:#161b22; border:1px solid #30363d;">
+            <div class="modal-header" style="border-color:#30363d;">
+                <h5 class="modal-title">แก้ไข Asset</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="edit-pk" value="{{ asset.pk }}">
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label class="form-label small text-muted">Agent IP</label>
+                        <input type="text" id="f-agent-ip" class="form-control form-control-sm" value="{{ asset.agent_ip }}" disabled>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small text-muted">Agent Name</label>
+                        <input type="text" id="f-agent-name" class="form-control form-control-sm" value="{{ asset.agent_name }}">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small text-muted">Hostname</label>
+                        <input type="text" id="f-hostname" class="form-control form-control-sm" value="{{ asset.hostname }}">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small text-muted">ผู้ดูแล</label>
+                        <input type="text" id="f-owner" class="form-control form-control-sm" value="{{ asset.owner }}">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small text-muted">แผนก</label>
+                        <input type="text" id="f-department" class="form-control form-control-sm" value="{{ asset.department }}">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small text-muted">Location</label>
+                        <input type="text" id="f-location" class="form-control form-control-sm" value="{{ asset.location }}">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small text-muted">ประเภท</label>
+                        <select id="f-asset-type" class="form-select form-select-sm">
+                            <option value="workstation" {% if asset.asset_type == 'workstation' %}selected{% endif %}>Workstation</option>
+                            <option value="server" {% if asset.asset_type == 'server' %}selected{% endif %}>Server</option>
+                            <option value="network" {% if asset.asset_type == 'network' %}selected{% endif %}>Network Device</option>
+                            <option value="other" {% if asset.asset_type == 'other' %}selected{% endif %}>Other</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small text-muted">Criticality</label>
+                        <select id="f-criticality" class="form-select form-select-sm">
+                            <option value="LOW" {% if asset.criticality == 'LOW' %}selected{% endif %}>LOW</option>
+                            <option value="MEDIUM" {% if asset.criticality == 'MEDIUM' %}selected{% endif %}>MEDIUM</option>
+                            <option value="HIGH" {% if asset.criticality == 'HIGH' %}selected{% endif %}>HIGH</option>
+                            <option value="CRITICAL" {% if asset.criticality == 'CRITICAL' %}selected{% endif %}>CRITICAL</option>
+                        </select>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label small text-muted">หมายเหตุ</label>
+                        <textarea id="f-notes" class="form-control form-control-sm" rows="2">{{ asset.notes }}</textarea>
+                    </div>
+                </div>
+                <div id="modal-result" class="mt-2 small" style="display:none;"></div>
+            </div>
+            <div class="modal-footer" style="border-color:#30363d;">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+                <button class="btn btn-sm btn-success" onclick="saveAsset()"><i class="bi bi-check-circle me-1"></i>บันทึก</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const csrfToken = (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '';
+let assetModal;
+document.addEventListener('DOMContentLoaded', () => { assetModal = new bootstrap.Modal(document.getElementById('assetModal')); });
+function openEditModal() { assetModal.show(); }
+async function saveAsset() {
+    const pk = document.getElementById('edit-pk').value;
+    const payload = {
+        agent_name:  document.getElementById('f-agent-name').value.trim(),
+        hostname:    document.getElementById('f-hostname').value.trim(),
+        owner:       document.getElementById('f-owner').value.trim(),
+        department:  document.getElementById('f-department').value.trim(),
+        location:    document.getElementById('f-location').value.trim(),
+        asset_type:  document.getElementById('f-asset-type').value,
+        criticality: document.getElementById('f-criticality').value,
+        notes:       document.getElementById('f-notes').value.trim(),
+    };
+    const resp = await fetch(`/assets/${pk}/edit/`, {
+        method:'POST', headers:{'X-CSRFToken':csrfToken,'Content-Type':'application/json'},
+        body: JSON.stringify(payload),
+    });
+    const data = await resp.json();
+    if (data.ok) location.reload();
+    else {
+        const r = document.getElementById('modal-result');
+        r.style.display='block';
+        r.innerHTML=`<span class="text-danger">${data.error||'เกิดข้อผิดพลาด'}</span>`;
+    }
+}
+</script>
+{% endblock %}

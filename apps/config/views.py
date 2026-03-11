@@ -15,7 +15,7 @@ from .models import IntegrationConfig
 from django.conf import settings as _settings
 SOC_BOT_ENV_PATH = str(_settings.BASE_DIR / 'soc-bot' / '.env')
 
-GROUPS = ['wazuh', 'ollama', 'openai', 'thehive', 'line', 'moph', 'system']
+GROUPS = ['wazuh', 'ollama', 'openai', 'thehive', 'line', 'moph', 'email', 'system']
 
 # Keys to include in .env file (order matters)
 ENV_SECTIONS = {
@@ -65,15 +65,23 @@ def settings_view(request):
         cfg.severity = cfg.key.replace('MOPH_IMG_', '')
     moph_img_ordered = [_moph_img_map[s] for s in _img_order if s in _moph_img_map]
 
-    # Auto-dismiss: แยก config ออกจาก generic loop เพื่อไม่ให้ duplicate input
-    _AUTODISMISS_KEYS = {'AUTODISMISS_ENABLED', 'AUTODISMISS_DAYS', 'AUTODISMISS_SEVERITIES'}
-    _ad_cfg = {c.key: c.value for c in grouped.get('system', [])
-               if c.key in _AUTODISMISS_KEYS}
-    # Remove autodismiss from system group — ใช้ dedicated UI แทน
+    # Keys with dedicated UI widgets — exclude from generic system params loop
+    _DEDICATED_SYSTEM_KEYS = {
+        'AUTODISMISS_ENABLED', 'AUTODISMISS_DAYS', 'AUTODISMISS_SEVERITIES',
+        'NOTIFY_AI_SOURCE', 'OLLAMA_ENABLED', 'OPENAI_ENABLED', 'PIPELINE_ENABLED',
+        'ABUSEIPDB_API_KEY', 'VIRUSTOTAL_API_KEY',
+    }
+    _sys_cfg = {c.key: c.value for c in grouped.get('system', [])
+                if c.key in _DEDICATED_SYSTEM_KEYS}
+    # Also collect threat_intel group keys
+    _ti_cfg = {c.key: c.value for c in IntegrationConfig.objects.filter(
+        key__in=['ABUSEIPDB_API_KEY', 'VIRUSTOTAL_API_KEY']
+    )}
+    # Remove dedicated keys from system group — ใช้ dedicated UI แทน
     grouped['system'] = [c for c in grouped.get('system', [])
-                         if c.key not in _AUTODISMISS_KEYS]
+                         if c.key not in _DEDICATED_SYSTEM_KEYS]
 
-    ad_severities = _ad_cfg.get('AUTODISMISS_SEVERITIES', 'INFO,LOW')
+    ad_severities = _sys_cfg.get('AUTODISMISS_SEVERITIES', 'INFO,LOW')
     ad_sev_list   = [s.strip() for s in ad_severities.split(',') if s.strip()]
 
     return render(request, 'config/settings.html', {
@@ -82,11 +90,21 @@ def settings_view(request):
         'bot_status': bot_status,
         'moph_img_ordered': moph_img_ordered,
         # Auto-dismiss
-        'autodismiss_enabled':     _ad_cfg.get('AUTODISMISS_ENABLED', 'false'),
-        'autodismiss_days':        _ad_cfg.get('AUTODISMISS_DAYS', '90'),
+        'autodismiss_enabled':     _sys_cfg.get('AUTODISMISS_ENABLED', 'false'),
+        'autodismiss_days':        _sys_cfg.get('AUTODISMISS_DAYS', '90'),
         'autodismiss_severities':  ad_severities,
         'autodismiss_sev_list':    ad_sev_list,
         'autodismiss_sev_choices': ['INFO', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'],
+        # AI Source
+        'notify_ai_source':  _sys_cfg.get('NOTIFY_AI_SOURCE', 'both'),
+        # AI Enabled flags
+        'ollama_enabled':    _sys_cfg.get('OLLAMA_ENABLED', 'true') == 'true',
+        'openai_enabled':    _sys_cfg.get('OPENAI_ENABLED', 'true') == 'true',
+        # Pipeline (notify) enabled
+        'pipeline_enabled':  _sys_cfg.get('PIPELINE_ENABLED', 'false') == 'true',
+        # Threat Intel API keys
+        'abuseipdb_api_key':   _ti_cfg.get('ABUSEIPDB_API_KEY', ''),
+        'virustotal_api_key':  _ti_cfg.get('VIRUSTOTAL_API_KEY', ''),
     })
 
 
@@ -177,8 +195,50 @@ def test_connection(request, group):
             return _test_line(configs)
         elif group == 'moph':
             return _test_moph(configs)
+        elif group == 'email':
+            return _test_email(configs)
         else:
             return JsonResponse({'ok': False, 'message': f'Unknown group: {group}'})
+    except Exception as e:
+        return JsonResponse({'ok': False, 'message': str(e)})
+
+
+def _test_email(configs):
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+    host = configs.get('SMTP_HOST', '').strip()
+    user = configs.get('SMTP_USER', '').strip()
+    password = configs.get('SMTP_PASSWORD', '').strip()
+    from_addr = configs.get('SMTP_FROM', user).strip() or user
+    if not host or not user:
+        return JsonResponse({'ok': False, 'message': 'SMTP_HOST หรือ SMTP_USER ยังไม่ได้กรอก'})
+    try:
+        port = int(configs.get('SMTP_PORT', '587') or '587')
+        use_tls = configs.get('SMTP_TLS', 'true').strip().lower() != 'false'
+
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = '[SOC Dashboard] Test Email — ทดสอบการแจ้งเตือน'
+        msg['From'] = from_addr
+        msg['To'] = user
+        msg.attach(MIMEText(
+            '<p>✅ ทดสอบส่ง email จาก <strong>SOC Dashboard</strong> สำเร็จ</p>'
+            '<p>Email notification สำหรับ Vulnerability AI Analysis พร้อมใช้งานแล้ว</p>',
+            'html', 'utf-8'
+        ))
+
+        if use_tls:
+            server = smtplib.SMTP(host, port, timeout=15)
+            server.starttls()
+        else:
+            server = smtplib.SMTP_SSL(host, port, timeout=15)
+        if password:
+            server.login(user, password)
+        server.sendmail(from_addr, [user], msg.as_string())
+        server.quit()
+        return JsonResponse({'ok': True, 'message': f'ส่ง test email ไปที่ {user} แล้ว กรุณาตรวจ inbox'})
+    except smtplib.SMTPAuthenticationError:
+        return JsonResponse({'ok': False, 'message': 'Authentication failed — ตรวจสอบ username/password หรือใช้ App Password'})
     except Exception as e:
         return JsonResponse({'ok': False, 'message': str(e)})
 
@@ -540,14 +600,92 @@ def run_autodismiss(request):
 def batch_analyze(request):
     import pathlib
     from apps.alerts.models import Alert
-    # Count unanalyzed (so UI knows how many to expect)
-    count = Alert.objects.filter(
+    from django.utils import timezone
+    from datetime import datetime
+
+    date_from = request.POST.get('date_from', '').strip()
+    date_to   = request.POST.get('date_to', '').strip()
+
+    qs = Alert.objects.filter(
         severity__in=['CRITICAL', 'HIGH', 'MEDIUM'],
         ai_analysis__isnull=True,
-    ).count()
-    # Signal soc-fetcher to pick up and process (avoids multi-process queue conflict)
-    pathlib.Path('/tmp/soc_batch_trigger').touch()
+    )
+
+    dt_from = dt_to = None
+    try:
+        if date_from:
+            dt_from = timezone.make_aware(datetime.strptime(date_from, '%Y-%m-%d'))
+            qs = qs.filter(timestamp__gte=dt_from)
+    except ValueError:
+        return JsonResponse({'ok': False, 'error': f'Invalid date_from: {date_from}'})
+    try:
+        if date_to:
+            # include full day: up to end of date_to
+            dt_to = timezone.make_aware(datetime.strptime(date_to, '%Y-%m-%d').replace(hour=23, minute=59, second=59))
+            qs = qs.filter(timestamp__lte=dt_to)
+    except ValueError:
+        return JsonResponse({'ok': False, 'error': f'Invalid date_to: {date_to}'})
+
+    count = qs.count()
+
+    # Write trigger file with optional date range JSON
+    trigger_data = {}
+    if date_from:
+        trigger_data['date_from'] = date_from
+    if date_to:
+        trigger_data['date_to'] = date_to
+
+    trigger = pathlib.Path('/tmp/soc_batch_trigger')
+    if trigger_data:
+        trigger.write_text(json.dumps(trigger_data))
+    else:
+        trigger.touch()
+
     return JsonResponse({'ok': True, 'queued': count})
+
+
+@login_required
+@require_POST
+def toggle_pipeline(request):
+    """Toggle PIPELINE_ENABLED. เมื่อ enable → trigger วิเคราะห์ alert วันนี้ทันที."""
+    import pathlib
+    from django.utils import timezone
+
+    cfg, _ = IntegrationConfig.objects.get_or_create(
+        key='PIPELINE_ENABLED',
+        defaults={'value': 'false', 'label': 'Pipeline Enabled',
+                  'group': 'system', 'is_secret': False, 'description': ''},
+    )
+    new_val = 'false' if cfg.value.lower() == 'true' else 'true'
+    cfg.value = new_val
+    cfg.save(update_fields=['value'])
+
+    # เมื่อเปิด pipeline → trigger วิเคราะห์ alert วันนี้ทันที (ไม่เอาย้อนหลัง)
+    if new_val == 'true':
+        today = timezone.localdate().strftime('%Y-%m-%d')
+        trigger_data = json.dumps({'date_from': today})
+        pathlib.Path('/tmp/soc_batch_trigger').write_text(trigger_data)
+
+    return JsonResponse({'ok': True, 'enabled': new_val == 'true'})
+
+
+@login_required
+@require_POST
+def toggle_ai_service(request, service):
+    """Toggle OLLAMA_ENABLED or OPENAI_ENABLED via AJAX."""
+    key_map = {'ollama': 'OLLAMA_ENABLED', 'openai': 'OPENAI_ENABLED'}
+    cfg_key = key_map.get(service)
+    if not cfg_key:
+        return JsonResponse({'ok': False, 'message': f'Unknown service: {service}'})
+
+    cfg, _ = IntegrationConfig.objects.get_or_create(
+        key=cfg_key,
+        defaults={'value': 'true', 'label': cfg_key, 'group': 'system', 'is_secret': False, 'description': ''},
+    )
+    new_val = 'false' if cfg.value.lower() == 'true' else 'true'
+    cfg.value = new_val
+    cfg.save(update_fields=['value'])
+    return JsonResponse({'ok': True, 'enabled': new_val == 'true'})
 
 
 @login_required
@@ -569,3 +707,118 @@ def restart_bot(request):
         return JsonResponse({'ok': False, 'message': 'Restart timed out'})
     except Exception as e:
         return JsonResponse({'ok': False, 'message': str(e)})
+
+
+# ── Wazuh Config Check ─────────────────────────────────────────────────────────
+@login_required
+def wazuh_config_check(request):
+    return render(request, 'config/wazuh_config.html', {
+        'indexer_url':  _settings.WAZUH_INDEXER_URL,
+        'vuln_index':   _settings.WAZUH_VULN_INDEX,
+        'dashboard_url': _settings.DASHBOARD_URL,
+    })
+
+
+@login_required
+def wazuh_probe(request):
+    """AJAX endpoint — probe Wazuh Indexer and return status of each check."""
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
+    idx_url  = _settings.WAZUH_INDEXER_URL.rstrip('/')
+    idx_user = _settings.WAZUH_INDEXER_USERNAME
+    idx_pass = _settings.WAZUH_INDEXER_PASSWORD
+    vuln_idx = _settings.WAZUH_VULN_INDEX
+
+    results = []
+
+    def _get(path, label):
+        auth = base64.b64encode(f'{idx_user}:{idx_pass}'.encode()).decode()
+        req = urllib.request.Request(
+            f'{idx_url}{path}',
+            headers={'Authorization': f'Basic {auth}', 'Content-Type': 'application/json'},
+        )
+        try:
+            with urllib.request.urlopen(req, context=ctx, timeout=8) as r:
+                return json.loads(r.read()), None
+        except urllib.error.HTTPError as e:
+            return None, f'HTTP {e.code}'
+        except urllib.error.URLError as e:
+            return None, str(e.reason)
+        except Exception as e:
+            return None, str(e)
+
+    # 1. Indexer connectivity
+    data, err = _get('/', 'indexer')
+    if data:
+        ver = data.get('version', {}).get('number', '?')
+        results.append({'id': 'indexer', 'label': 'Wazuh Indexer (OpenSearch)',
+                        'ok': True, 'detail': f'Connected — OpenSearch {ver}'})
+    else:
+        results.append({'id': 'indexer', 'label': 'Wazuh Indexer (OpenSearch)',
+                        'ok': False, 'detail': err})
+
+    # 2. Alert index exists
+    data, err = _get('/wazuh-alerts-4.x-*/_count', 'alert_index')
+    if data is not None:
+        count = data.get('count', 0)
+        results.append({'id': 'alert_index', 'label': 'Alert Index (wazuh-alerts-4.x-*)',
+                        'ok': True, 'detail': f'{count:,} documents'})
+    else:
+        results.append({'id': 'alert_index', 'label': 'Alert Index (wazuh-alerts-4.x-*)',
+                        'ok': False, 'detail': err or 'Index not found'})
+
+    # 3. Vulnerability index exists
+    data, err = _get(f'/{vuln_idx}/_count', 'vuln_index')
+    if data is not None:
+        count = data.get('count', 0)
+        ok = count > 0
+        results.append({'id': 'vuln_index',
+                        'label': f'Vulnerability Index ({vuln_idx})',
+                        'ok': ok,
+                        'detail': f'{count:,} documents' if ok else '0 documents — vulnerability-detector อาจยังไม่ได้เปิด'})
+    else:
+        results.append({'id': 'vuln_index',
+                        'label': f'Vulnerability Index ({vuln_idx})',
+                        'ok': False,
+                        'detail': err or 'Index not found — ต้องเปิด vulnerability-detector'})
+
+    # 4. MITRE field present in alerts
+    body = json.dumps({
+        "size": 1,
+        "query": {"exists": {"field": "rule.mitre.id"}},
+        "_source": ["rule.mitre.id"]
+    }).encode()
+    req = urllib.request.Request(
+        f'{idx_url}/wazuh-alerts-4.x-*/_search',
+        data=body,
+        headers={
+            'Authorization': 'Basic ' + base64.b64encode(f'{idx_user}:{idx_pass}'.encode()).decode(),
+            'Content-Type': 'application/json',
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, context=ctx, timeout=8) as r:
+            d = json.loads(r.read())
+            hits = d.get('hits', {}).get('total', {}).get('value', 0)
+            results.append({'id': 'mitre', 'label': 'MITRE ATT&CK mapping ใน alerts',
+                            'ok': hits > 0,
+                            'detail': f'{hits:,} alerts มี MITRE tag' if hits > 0 else 'ไม่พบ MITRE field — ตรวจสอบ rule groups'})
+    except Exception as e:
+        results.append({'id': 'mitre', 'label': 'MITRE ATT&CK mapping ใน alerts',
+                        'ok': False, 'detail': str(e)})
+
+    # 5. Syscollector (for asset port data)
+    data, err = _get('/wazuh-alerts-4.x-*/_count?q=decoder.name:syscollector', 'syscollector')
+    if data is not None:
+        count = data.get('count', 0)
+        results.append({'id': 'syscollector', 'label': 'Syscollector module (port/process data)',
+                        'ok': count > 0,
+                        'detail': f'{count:,} events' if count > 0 else 'ไม่พบ syscollector events'})
+    else:
+        results.append({'id': 'syscollector', 'label': 'Syscollector module',
+                        'ok': False, 'detail': err or 'ไม่พบข้อมูล'})
+
+    all_ok = all(r['ok'] for r in results)
+    return JsonResponse({'ok': all_ok, 'results': results})

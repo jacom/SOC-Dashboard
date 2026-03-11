@@ -73,9 +73,21 @@
                     </button>
                 </li>
                 <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="tab-email-btn" data-bs-toggle="tab"
+                            data-bs-target="#tab-email" type="button" role="tab">
+                        <i class="bi bi-envelope group-icon"></i>Email
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
                     <button class="nav-link" id="tab-system-btn" data-bs-toggle="tab"
                             data-bs-target="#tab-system" type="button" role="tab">
                         <i class="bi bi-gear group-icon"></i>System
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="tab-threat-intel-btn" data-bs-toggle="tab"
+                            data-bs-target="#tab-threat-intel" type="button" role="tab">
+                        <i class="bi bi-shield-exclamation group-icon"></i>Threat Intel
                     </button>
                 </li>
             </ul>
@@ -166,9 +178,20 @@
                             <div class="card">
                                 <div class="card-header d-flex justify-content-between align-items-center">
                                     <span><i class="bi bi-cpu me-2" style="color:#58a6ff;"></i>Ollama LLM</span>
-                                    <button type="button" class="btn btn-sm btn-outline-secondary test-btn" data-group="ollama">
-                                        <i class="bi bi-plug me-1"></i>Test Connection
-                                    </button>
+                                    <div class="d-flex gap-2 align-items-center">
+                                        <button type="button" class="btn btn-sm btn-outline-secondary test-btn" data-group="ollama">
+                                            <i class="bi bi-plug me-1"></i>Test Connection
+                                        </button>
+                                        <button type="button"
+                                                id="ollama-toggle-btn"
+                                                class="btn btn-sm {% if ollama_enabled %}btn-success{% else %}btn-outline-secondary{% endif %} ai-toggle-btn"
+                                                data-service="ollama"
+                                                data-enabled="{{ ollama_enabled|yesno:'true,false' }}"
+                                                title="เปิด/ปิด Ollama">
+                                            <i class="bi {% if ollama_enabled %}bi-toggle-on{% else %}bi-toggle-off{% endif %} me-1"></i>
+                                            <span>{% if ollama_enabled %}Enabled{% else %}Disabled{% endif %}</span>
+                                        </button>
+                                    </div>
                                 </div>
                                 <div class="card-body">
                                     <div class="connection-result" id="result-ollama"></div>
@@ -224,13 +247,39 @@
                             <div class="card">
                                 <div class="card-header d-flex justify-content-between align-items-center">
                                     <span><i class="bi bi-graph-up me-2" style="color:#58a6ff;"></i>AI Analysis Coverage</span>
-                                    <button type="button" class="btn btn-sm btn-outline-success" id="batch-analyze-btn">
+                                    <button type="button" class="btn btn-sm btn-outline-success" id="batch-analyze-btn"
+                                            {% if not ollama_enabled %}disabled title="Ollama ถูก Disabled"{% endif %}>
                                         <i class="bi bi-cpu me-1"></i>Batch Analyze
                                     </button>
                                 </div>
                                 <div class="card-body">
                                     <div id="ollama-stats" class="text-muted" style="font-size:0.85rem;">
                                         <i class="bi bi-hourglass-split me-1"></i>Loading…
+                                    </div>
+                                    <!-- Date range filter -->
+                                    <div class="mt-3">
+                                        <div class="field-label mb-1">กรองช่วงเวลา (ไม่บังคับ)</div>
+                                        <div class="row g-2 align-items-center">
+                                            <div class="col">
+                                                <input type="date" class="form-control form-control-sm" id="batch-date-from"
+                                                       placeholder="จากวันที่" title="จากวันที่"
+                                                       style="background:#0d1117; color:#c9d1d9; border-color:#30363d;">
+                                            </div>
+                                            <div class="col-auto" style="color:#6e7681; font-size:0.85rem;">ถึง</div>
+                                            <div class="col">
+                                                <input type="date" class="form-control form-control-sm" id="batch-date-to"
+                                                       placeholder="ถึงวันที่" title="ถึงวันที่"
+                                                       style="background:#0d1117; color:#c9d1d9; border-color:#30363d;">
+                                            </div>
+                                            <div class="col-auto">
+                                                <button type="button" class="btn btn-sm btn-outline-secondary" id="batch-date-clear" title="ล้างวันที่">
+                                                    <i class="bi bi-x-circle"></i>
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div class="field-description mt-1" id="batch-date-hint">
+                                            <i class="bi bi-info-circle me-1"></i>เว้นว่างไว้เพื่อวิเคราะห์ทุก alert ที่ยังไม่มี AI Analysis
+                                        </div>
                                     </div>
                                     <!-- Live progress (shown during batch analyze) -->
                                     <div id="batch-progress" style="display:none; margin-top:12px;">
@@ -260,9 +309,20 @@
                     <div class="card">
                         <div class="card-header d-flex justify-content-between align-items-center">
                             <span><i class="bi bi-chat-square-dots me-2" style="color:#58a6ff;"></i>Chat AI (OpenAI-compatible)</span>
-                            <button type="button" class="btn btn-sm btn-outline-secondary test-btn" data-group="openai">
-                                <i class="bi bi-plug me-1"></i>Test Connection
-                            </button>
+                            <div class="d-flex gap-2 align-items-center">
+                                <button type="button" class="btn btn-sm btn-outline-secondary test-btn" data-group="openai">
+                                    <i class="bi bi-plug me-1"></i>Test Connection
+                                </button>
+                                <button type="button"
+                                        id="openai-toggle-btn"
+                                        class="btn btn-sm {% if openai_enabled %}btn-success{% else %}btn-outline-secondary{% endif %} ai-toggle-btn"
+                                        data-service="openai"
+                                        data-enabled="{{ openai_enabled|yesno:'true,false' }}"
+                                        title="เปิด/ปิด Chat AI">
+                                    <i class="bi {% if openai_enabled %}bi-toggle-on{% else %}bi-toggle-off{% endif %} me-1"></i>
+                                    <span>{% if openai_enabled %}Enabled{% else %}Disabled{% endif %}</span>
+                                </button>
+                            </div>
                         </div>
                         <div class="card-body">
                             <div class="connection-result" id="result-openai"></div>
@@ -375,6 +435,42 @@
 
                 <!-- LINE Tab -->
                 <div class="tab-pane fade" id="tab-line" role="tabpanel">
+
+                    <!-- Pipeline Enable card -->
+                    <div class="card mb-3" id="pipeline-enable-card"
+                         style="border-color: {% if pipeline_enabled %}#238636{% else %}#f0883e{% endif %};">
+                        <div class="card-body py-3">
+                            <div class="d-flex align-items-center justify-content-between flex-wrap gap-3">
+                                <div>
+                                    <div class="d-flex align-items-center gap-2 mb-1">
+                                        <span id="pipeline-status-icon" style="font-size:1.5rem;">
+                                            {% if pipeline_enabled %}✅{% else %}⚠️{% endif %}
+                                        </span>
+                                        <strong style="font-size:1.05rem;" id="pipeline-status-label">
+                                            {% if pipeline_enabled %}Pipeline กำลังทำงาน{% else %}Pipeline ยังไม่เปิดใช้งาน{% endif %}
+                                        </strong>
+                                    </div>
+                                    <div class="text-muted" style="font-size:0.83rem;" id="pipeline-status-desc">
+                                        {% if pipeline_enabled %}
+                                            ระบบส่ง alert ไปวิเคราะห์ด้วย AI และแจ้งเตือน LINE/TheHive
+                                        {% else %}
+                                            Alert จะถูกบันทึกใน Dashboard เท่านั้น — ยังไม่ส่งไป AI และไม่แจ้งเตือน<br>
+                                            <span style="color:#f0883e;">กด <strong>Enable Pipeline</strong> เมื่อพร้อมเริ่มรับแจ้งเตือน (จะเริ่มจาก alert วันนี้เท่านั้น)</span>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                <button type="button"
+                                        id="pipeline-toggle-btn"
+                                        class="btn {% if pipeline_enabled %}btn-success{% else %}btn-warning{% endif %} px-4"
+                                        style="min-width:170px;">
+                                    <i class="bi {% if pipeline_enabled %}bi-toggle-on{% else %}bi-toggle-off{% endif %} me-2"></i>
+                                    <span id="pipeline-toggle-label">{% if pipeline_enabled %}Disable Pipeline{% else %}Enable Pipeline{% endif %}</span>
+                                </button>
+                            </div>
+                            <div id="pipeline-toggle-result" class="mt-2 small" style="display:none;"></div>
+                        </div>
+                    </div>
+
                     <div class="row g-3">
 
                         <!-- คอลัมน์ซ้าย: MOPH Notify credentials -->
@@ -471,8 +567,82 @@
                     </div>
                 </div>
 
+                <!-- Email Tab -->
+                <div class="tab-pane fade" id="tab-email" role="tabpanel">
+                    <div class="card mb-3">
+                        <div class="card-header">
+                            <i class="bi bi-envelope me-2" style="color:#58a6ff;"></i>SMTP Email — แจ้งเตือนเจ้าของ Asset
+                        </div>
+                        <div class="card-body">
+                            <p class="text-muted small mb-3">
+                                ใช้ส่งอีเมลแจ้งเตือนเจ้าของ Asset เมื่อ AI วิเคราะห์ Vulnerability เสร็จ
+                                (ต้องกรอก <strong>Email</strong> ของเจ้าของใน Asset Management ด้วย)
+                            </p>
+                            {% for cfg in grouped.email %}
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold">{{ cfg.label }}</label>
+                                {% if cfg.description %}<div class="text-muted small mb-1">{{ cfg.description }}</div>{% endif %}
+                                {% if cfg.is_secret %}
+                                <div class="input-group">
+                                    <input type="password" class="form-control secret-field"
+                                           name="cfg_{{ cfg.key }}" value="{{ cfg.value }}" autocomplete="off">
+                                    <button class="btn btn-outline-secondary toggle-secret" type="button" title="Show/hide">
+                                        <i class="bi bi-eye"></i>
+                                    </button>
+                                </div>
+                                {% elif cfg.key == 'SMTP_TLS' %}
+                                <select class="form-select" name="cfg_{{ cfg.key }}">
+                                    <option value="true" {% if cfg.value == 'true' %}selected{% endif %}>true (STARTTLS, port 587)</option>
+                                    <option value="false" {% if cfg.value == 'false' %}selected{% endif %}>false (SSL, port 465)</option>
+                                </select>
+                                {% else %}
+                                <input type="text" class="form-control" name="cfg_{{ cfg.key }}" value="{{ cfg.value }}">
+                                {% endif %}
+                            </div>
+                            {% endfor %}
+                            <button type="button" class="btn btn-sm btn-outline-secondary test-btn" data-group="email">
+                                <i class="bi bi-send me-1"></i>Test Email Connection
+                            </button>
+                            <div id="result-email" class="mt-2 small"></div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- System Tab -->
                 <div class="tab-pane fade" id="tab-system" role="tabpanel">
+
+                    <!-- AI Source card -->
+                    <div class="card mb-3">
+                        <div class="card-header">
+                            <i class="bi bi-robot me-2" style="color:#58a6ff;"></i>AI Source สำหรับ Notify
+                        </div>
+                        <div class="card-body">
+                            <div class="row g-3 align-items-start">
+                                <div class="col-md-4">
+                                    <div class="field-label">เลือก AI ที่ใช้วิเคราะห์</div>
+                                    <select class="form-select" name="cfg_NOTIFY_AI_SOURCE">
+                                        <option value="both"    {% if notify_ai_source == 'both'    %}selected{% endif %}>ใช้ทั้งคู่ (Ollama → Chat AI)</option>
+                                        <option value="ollama"  {% if notify_ai_source == 'ollama'  %}selected{% endif %}>Ollama เท่านั้น</option>
+                                        <option value="chatgpt" {% if notify_ai_source == 'chatgpt' %}selected{% endif %}>Chat AI เท่านั้น</option>
+                                    </select>
+                                    <div class="field-description">
+                                        กำหนด AI pipeline ที่ใช้ก่อนส่ง LINE/MOPH notify
+                                    </div>
+                                </div>
+                                <div class="col-md-8">
+                                    <div class="field-label">คำอธิบาย</div>
+                                    <div class="small" style="color:#8b949e; line-height:1.7;">
+                                        <span class="badge bg-secondary me-1">ใช้ทั้งคู่</span>
+                                        Ollama วิเคราะห์ก่อน → ถ้า CRITICAL/HIGH ส่งต่อให้ Chat AI → ถ้า Chat AI ยืนยัน Critical/High → ส่ง Notify<br>
+                                        <span class="badge me-1" style="background:#1f6feb;">Ollama</span>
+                                        ใช้ Ollama อย่างเดียว → ถ้า CRITICAL/HIGH → ส่ง Notify ทันที (เร็วกว่าเมื่อไม่มี GPU)<br>
+                                        <span class="badge me-1" style="background:#388bfd;">Chat AI</span>
+                                        ข้าม Ollama → ใช้ Chat AI (OpenAI/Local) วิเคราะห์ → ถ้า Critical/High → ส่ง Notify
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
 
                     <!-- Auto-dismiss card -->
                     <div class="card mb-3">
@@ -548,6 +718,52 @@
                     </div>
                 </div>
 
+                <!-- Threat Intel Tab -->
+                <div class="tab-pane fade" id="tab-threat-intel" role="tabpanel">
+                    <div class="card">
+                        <div class="card-header">
+                            <i class="bi bi-shield-exclamation me-2" style="color:#f0883e;"></i>Threat Intelligence API Keys
+                        </div>
+                        <div class="card-body">
+                            <p class="text-muted small mb-3">
+                                Configure API keys for threat intelligence providers used for IP reputation lookups on alert detail pages.
+                            </p>
+                            <div class="mb-4">
+                                <div class="field-label">AbuseIPDB API Key</div>
+                                <div class="input-group">
+                                    <input type="password" class="form-control" name="cfg_ABUSEIPDB_API_KEY"
+                                           value="{{ abuseipdb_api_key }}"
+                                           placeholder="Enter your AbuseIPDB API key"
+                                           autocomplete="new-password">
+                                    <button class="btn btn-outline-secondary toggle-secret" type="button" title="Show/hide">
+                                        <i class="bi bi-eye"></i>
+                                    </button>
+                                </div>
+                                <div class="field-description">
+                                    Get your free API key at <a href="https://www.abuseipdb.com/account/api" target="_blank" rel="noopener" style="color:#58a6ff;">abuseipdb.com</a>.
+                                    IPs with abuse confidence score &ge; 25% are flagged as malicious.
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <div class="field-label">VirusTotal API Key</div>
+                                <div class="input-group">
+                                    <input type="password" class="form-control" name="cfg_VIRUSTOTAL_API_KEY"
+                                           value="{{ virustotal_api_key }}"
+                                           placeholder="Enter your VirusTotal API key"
+                                           autocomplete="new-password">
+                                    <button class="btn btn-outline-secondary toggle-secret" type="button" title="Show/hide">
+                                        <i class="bi bi-eye"></i>
+                                    </button>
+                                </div>
+                                <div class="field-description">
+                                    Get your free API key at <a href="https://www.virustotal.com/gui/my-apikey" target="_blank" rel="noopener" style="color:#58a6ff;">virustotal.com</a>.
+                                    IPs flagged by 1 or more engines are marked malicious.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
             </div><!-- /tab-content -->
 
             <!-- Save button -->
@@ -602,6 +818,47 @@
 {% block extra_scripts %}
 <script>
 const csrfToken = '{{ csrf_token }}';
+
+// AI service enable/disable toggle
+document.querySelectorAll('.ai-toggle-btn').forEach(btn => {
+    btn.addEventListener('click', async function () {
+        const service = this.dataset.service;
+        const icon    = this.querySelector('i');
+        const label   = this.querySelector('span');
+        this.disabled = true;
+
+        try {
+            const resp = await fetch(`/settings/toggle-ai/${service}/`, {
+                method: 'POST',
+                headers: { 'X-CSRFToken': csrfToken },
+            });
+            const data = await resp.json();
+            if (data.ok) {
+                const enabled = data.enabled;
+                this.dataset.enabled = enabled ? 'true' : 'false';
+                // Update button style
+                this.classList.toggle('btn-success', enabled);
+                this.classList.toggle('btn-outline-secondary', !enabled);
+                // Update icon
+                icon.classList.toggle('bi-toggle-on', enabled);
+                icon.classList.toggle('bi-toggle-off', !enabled);
+                label.textContent = enabled ? 'Enabled' : 'Disabled';
+                // Sync Batch Analyze button with Ollama state
+                if (service === 'ollama') {
+                    const batchBtn = document.getElementById('batch-analyze-btn');
+                    if (batchBtn) {
+                        batchBtn.disabled = !enabled;
+                        batchBtn.title = enabled ? '' : 'Ollama ถูก Disabled';
+                    }
+                }
+            }
+        } catch (e) {
+            console.error('Toggle failed', e);
+        } finally {
+            this.disabled = false;
+        }
+    });
+});
 
 // Auto-set OPENAI_URL based on selected model
 (function() {
@@ -818,6 +1075,13 @@ async function _pollPipelineStatus() {
     }
 }
 
+document.getElementById('batch-date-clear').addEventListener('click', function () {
+    document.getElementById('batch-date-from').value = '';
+    document.getElementById('batch-date-to').value = '';
+    document.getElementById('batch-date-hint').innerHTML =
+        '<i class="bi bi-info-circle me-1"></i>เว้นว่างไว้เพื่อวิเคราะห์ทุก alert ที่ยังไม่มี AI Analysis';
+});
+
 document.getElementById('batch-analyze-btn').addEventListener('click', async function () {
     const btn = this;
     const resultEl = document.getElementById('batch-result');
@@ -827,6 +1091,15 @@ document.getElementById('batch-analyze-btn').addEventListener('click', async fun
     resultEl.style.display = 'none';
     progressEl.style.display = 'none';
 
+    const dateFrom = document.getElementById('batch-date-from').value;
+    const dateTo   = document.getElementById('batch-date-to').value;
+
+    // Update hint with selected range
+    const hintEl = document.getElementById('batch-date-hint');
+    if (dateFrom || dateTo) {
+        hintEl.innerHTML = `<i class="bi bi-calendar-range me-1 text-info"></i>ช่วงเวลา: ${dateFrom || 'เริ่มต้น'} ถึง ${dateTo || 'ปัจจุบัน'}`;
+    }
+
     // Snapshot current analyzed count before we queue
     try {
         const snap = await fetch('/settings/pipeline-status/');
@@ -835,10 +1108,15 @@ document.getElementById('batch-analyze-btn').addEventListener('click', async fun
         _batchTotal = snapData.total;
     } catch(e) {}
 
+    const formData = new FormData();
+    if (dateFrom) formData.append('date_from', dateFrom);
+    if (dateTo)   formData.append('date_to',   dateTo);
+
     try {
         const resp = await fetch('/settings/batch-analyze/', {
             method: 'POST',
-            headers: { 'X-CSRFToken': csrfToken }
+            headers: { 'X-CSRFToken': csrfToken },
+            body: formData,
         });
         const data = await resp.json();
         if (data.ok) {
@@ -932,7 +1210,60 @@ document.getElementById('moph-flex-btn').addEventListener('click', async functio
     }
 });
 
-// Restart bot
+// ─── Pipeline Enable/Disable ──────────────────────────────────────────────────
+document.getElementById('pipeline-toggle-btn').addEventListener('click', async function () {
+    const btn      = this;
+    const resultEl = document.getElementById('pipeline-toggle-result');
+    const card     = document.getElementById('pipeline-enable-card');
+    const icon     = btn.querySelector('i');
+    const label    = document.getElementById('pipeline-toggle-label');
+    const statusIcon  = document.getElementById('pipeline-status-icon');
+    const statusLabel = document.getElementById('pipeline-status-label');
+    const statusDesc  = document.getElementById('pipeline-status-desc');
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>กำลังบันทึก…';
+    resultEl.style.display = 'none';
+
+    try {
+        const resp = await fetch('/settings/toggle-pipeline/', {
+            method: 'POST',
+            headers: { 'X-CSRFToken': csrfToken },
+        });
+        const data = await resp.json();
+        if (data.ok) {
+            const enabled = data.enabled;
+            // Update card border
+            card.style.borderColor = enabled ? '#238636' : '#f0883e';
+            // Update status icon/label/desc
+            statusIcon.textContent  = enabled ? '✅' : '⚠️';
+            statusLabel.textContent = enabled ? 'Pipeline กำลังทำงาน' : 'Pipeline ยังไม่เปิดใช้งาน';
+            statusDesc.innerHTML = enabled
+                ? 'ระบบส่ง alert ไปวิเคราะห์ด้วย AI และแจ้งเตือน LINE/TheHive'
+                : 'Alert จะถูกบันทึกใน Dashboard เท่านั้น — ยังไม่ส่งไป AI และไม่แจ้งเตือน';
+            // Update button
+            btn.className = `btn ${enabled ? 'btn-success' : 'btn-warning'} px-4`;
+            btn.innerHTML = `<i class="bi ${enabled ? 'bi-toggle-on' : 'bi-toggle-off'} me-2"></i><span id="pipeline-toggle-label">${enabled ? 'Disable Pipeline' : 'Enable Pipeline'}</span>`;
+            // Show result
+            resultEl.style.display = 'block';
+            if (enabled) {
+                resultEl.innerHTML = '<span class="text-success"><i class="bi bi-check-circle-fill me-1"></i>Pipeline เปิดแล้ว — กำลังวิเคราะห์ alert วันนี้ใน background…</span>';
+            } else {
+                resultEl.innerHTML = '<span class="text-warning"><i class="bi bi-pause-circle-fill me-1"></i>Pipeline ปิดแล้ว — alerts จะถูกเก็บใน Dashboard เท่านั้น</span>';
+            }
+        } else {
+            resultEl.style.display = 'block';
+            resultEl.innerHTML = `<span class="text-danger">Error: ${data.error || 'Unknown'}</span>`;
+            btn.disabled = false;
+        }
+    } catch (e) {
+        resultEl.style.display = 'block';
+        resultEl.innerHTML = '<span class="text-danger">Request failed</span>';
+        btn.disabled = false;
+    }
+});
+
+// ─── Restart bot ──────────────────────────────────────────────────────────────
 document.getElementById('restart-bot-btn').addEventListener('click', async function () {
     const resultEl = document.getElementById('restart-result');
     resultEl.innerHTML = '<span class="text-muted">Restarting...</span>';

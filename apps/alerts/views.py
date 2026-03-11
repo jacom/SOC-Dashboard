@@ -17,7 +17,7 @@ def alert_list(request):
     date_from     = request.GET.get('date_from', '')
     date_to       = request.GET.get('date_to', '')
     search        = request.GET.get('search', '')
-    sort          = request.GET.get('sort', 'time')
+    sort          = request.GET.get('sort', 'severity')
     show_dismissed = request.GET.get('dismissed', '') == '1'
 
     if not show_dismissed:
@@ -242,6 +242,7 @@ def alert_raw_data(request, pk):
 @require_POST
 def push_to_thehive(request, pk):
     import urllib.request as _req
+    import urllib.error as _uerr
     import json as _json
     from apps.config.models import IntegrationConfig
     from apps.incidents.models import Incident
@@ -307,8 +308,10 @@ def push_to_thehive(request, pk):
         )
         with _req.urlopen(http_req, timeout=15) as resp:
             result = _json.loads(resp.read())
-    except _req.error.HTTPError as e:
+    except _uerr.HTTPError as e:
         return JsonResponse({'ok': False, 'error': f'TheHive HTTP {e.code}: {e.read().decode()[:200]}'})
+    except _uerr.URLError as e:
+        return JsonResponse({'ok': False, 'error': f'Cannot connect to TheHive: {e.reason}'})
     except Exception as e:
         return JsonResponse({'ok': False, 'error': str(e)})
 
@@ -346,6 +349,12 @@ def bulk_dismiss(request):
     count = Alert.objects.filter(pk__in=ids).update(
         dismissed=True, dismissed_at=timezone.now()
     )
+    try:
+        from apps.core.audit import audit
+        audit(request, 'alert_dismiss', 'Alert', ','.join(map(str, ids)),
+              f'Dismissed {count} alert(s): {ids[:5]}')
+    except Exception:
+        pass
     return JsonResponse({'ok': True, 'dismissed': count})
 
 
@@ -356,6 +365,12 @@ def bulk_undismiss(request):
     data = _json.loads(request.body)
     ids = [int(i) for i in data.get('ids', []) if str(i).isdigit()]
     count = Alert.objects.filter(pk__in=ids).update(dismissed=False, dismissed_at=None)
+    try:
+        from apps.core.audit import audit
+        audit(request, 'alert_undismiss', 'Alert', ','.join(map(str, ids)),
+              f'Undismissed {count} alert(s)')
+    except Exception:
+        pass
     return JsonResponse({'ok': True, 'restored': count})
 
 
@@ -394,3 +409,261 @@ def export_alerts_csv(request):
             ai.attack_type_en or ai.attack_type if ai else '',
         ])
     return response
+
+
+# ─── Alert Suppress Rules ────────────────────────────────────────────────────
+
+@login_required
+def suppress_rule_list(request):
+    from .models import AlertSuppressRule
+    rules = AlertSuppressRule.objects.all()
+    return render(request, 'alerts/suppress_list.html', {'rules': rules})
+
+
+@login_required
+@require_POST
+def suppress_rule_add(request):
+    from .models import AlertSuppressRule
+    from django.http import JsonResponse
+    rule_id  = request.POST.get('rule_id', '').strip()
+    agent_ip = request.POST.get('agent_ip', '').strip() or None
+    reason   = request.POST.get('reason', '').strip()
+
+    if not rule_id:
+        return JsonResponse({'ok': False, 'error': 'rule_id is required'})
+
+    obj, created = AlertSuppressRule.objects.get_or_create(
+        rule_id=rule_id,
+        agent_ip=agent_ip,
+        defaults={'reason': reason, 'is_active': True},
+    )
+    if not created:
+        obj.reason    = reason
+        obj.is_active = True
+        obj.save(update_fields=['reason', 'is_active', 'updated_at'])
+
+    return JsonResponse({
+        'ok': True,
+        'id': obj.pk,
+        'rule_id': obj.rule_id,
+        'agent_ip': obj.agent_ip or '',
+        'reason': obj.reason,
+        'is_active': obj.is_active,
+        'created': created,
+    })
+
+
+@login_required
+@require_POST
+def suppress_rule_toggle(request, pk):
+    from .models import AlertSuppressRule
+    from django.http import JsonResponse
+    try:
+        rule = AlertSuppressRule.objects.get(pk=pk)
+    except AlertSuppressRule.DoesNotExist:
+        return JsonResponse({'ok': False, 'error': 'Not found'})
+    rule.is_active = not rule.is_active
+    rule.save(update_fields=['is_active', 'updated_at'])
+    return JsonResponse({'ok': True, 'is_active': rule.is_active})
+
+
+@login_required
+@require_POST
+def suppress_rule_delete(request, pk):
+    from .models import AlertSuppressRule
+    from django.http import JsonResponse
+    AlertSuppressRule.objects.filter(pk=pk).delete()
+    return JsonResponse({'ok': True})
+
+
+# ─── Threat Intelligence ──────────────────────────────────────────────────────
+
+@login_required
+def threat_intel_lookup(request, pk):
+    """AJAX — check src_ip of alert against threat intel providers."""
+    from .threat_intel import lookup_ip
+    alert = get_object_or_404(Alert, pk=pk)
+    ip = alert.src_ip or alert.agent_ip
+    if not ip:
+        return JsonResponse({'ok': False, 'error': 'No IP address on this alert'})
+    force = request.GET.get('force') == '1'
+    results = lookup_ip(ip, force=force)
+    data = []
+    for r in results:
+        data.append({
+            'provider': r.provider,
+            'is_malicious': r.is_malicious,
+            'score': r.score,
+            'country': r.country,
+            'isp': r.isp,
+            'domain': r.domain,
+            'checked_at': r.checked_at.strftime('%Y-%m-%d %H:%M'),
+        })
+    return JsonResponse({'ok': True, 'ip': ip, 'results': data})
+
+
+# ── Playbook views ────────────────────────────────────────────────
+
+@login_required
+def playbook_list(request):
+    from .models import Playbook, PlaybookRun
+    from django.db.models import Count
+
+    playbooks = list(
+        Playbook.objects.annotate(runs_count=Count('runs', distinct=True)).order_by('name')
+    )
+
+    # Pre-process fields and compute completion stats
+    for pb in playbooks:
+        pb.rule_ids_list    = [r.strip() for r in pb.rule_ids.split(',')       if r.strip()]
+        pb.rule_groups_list = [g.strip() for g in pb.rule_groups.split(',')    if g.strip()]
+        pb.severity_list    = [s.strip() for s in pb.severity_filter.split(',') if s.strip()]
+        if pb.runs_count > 0 and pb.steps:
+            runs        = list(PlaybookRun.objects.filter(playbook=pb))
+            n_steps     = len(pb.steps)
+            pb.completed_runs = sum(1 for r in runs if len(r.completed_steps) >= n_steps)
+            pb.avg_pct        = round(
+                sum(min(len(r.completed_steps), n_steps) / n_steps * 100 for r in runs)
+                / pb.runs_count
+            )
+        else:
+            pb.completed_runs = 0
+            pb.avg_pct        = 0
+
+    return render(request, 'alerts/playbook_list.html', {'playbooks': playbooks})
+
+
+@login_required
+@require_POST
+def playbook_save(request):
+    """Create or update a playbook via AJAX (JSON body)."""
+    import json as json_mod
+    from .models import Playbook
+    try:
+        data = json_mod.loads(request.body)
+    except Exception:
+        return JsonResponse({'ok': False, 'error': 'Invalid JSON'}, status=400)
+
+    pk = data.get('id')
+    if pk:
+        pb = get_object_or_404(Playbook, pk=pk)
+    else:
+        pb = Playbook()
+
+    pb.name            = (data.get('name') or '').strip()
+    pb.description     = (data.get('description') or '').strip()
+    pb.rule_ids        = (data.get('rule_ids') or '').strip()
+    pb.rule_groups     = (data.get('rule_groups') or '').strip()
+    pb.severity_filter = (data.get('severity_filter') or '').strip()
+    pb.is_active       = bool(data.get('is_active', True))
+    # steps: accept list or newline-separated string
+    steps_raw = data.get('steps', [])
+    if isinstance(steps_raw, str):
+        pb.steps = [s.strip() for s in steps_raw.splitlines() if s.strip()]
+    else:
+        pb.steps = [str(s).strip() for s in steps_raw if str(s).strip()]
+
+    if not pb.name:
+        return JsonResponse({'ok': False, 'error': 'Name is required'}, status=400)
+    pb.save()
+    return JsonResponse({'ok': True, 'id': pb.pk, 'name': pb.name})
+
+
+@login_required
+@require_POST
+def playbook_delete(request, pk):
+    from .models import Playbook
+    pb = get_object_or_404(Playbook, pk=pk)
+    pb.delete()
+    return JsonResponse({'ok': True})
+
+
+@login_required
+def playbook_get(request, pk):
+    from .models import Playbook
+    pb = get_object_or_404(Playbook, pk=pk)
+    return JsonResponse({
+        'ok': True, 'id': pb.pk,
+        'name': pb.name, 'description': pb.description,
+        'rule_ids': pb.rule_ids, 'rule_groups': pb.rule_groups,
+        'severity_filter': pb.severity_filter, 'is_active': pb.is_active,
+        'steps': pb.steps,
+    })
+
+
+@login_required
+def alert_playbooks(request, pk):
+    """Return matching playbooks + run status for an alert."""
+    from .models import Playbook, PlaybookRun
+    alert = get_object_or_404(Alert, pk=pk)
+    active_pbs = Playbook.objects.filter(is_active=True)
+    matching = [pb for pb in active_pbs if pb.matches_alert(alert)]
+    result = []
+    for pb in matching:
+        try:
+            run = PlaybookRun.objects.get(alert=alert, playbook=pb)
+            completed = run.completed_steps
+            notes = run.notes
+            run_id = run.pk
+        except PlaybookRun.DoesNotExist:
+            completed = []
+            notes = ''
+            run_id = None
+        result.append({
+            'id': pb.pk, 'name': pb.name,
+            'description': pb.description,
+            'steps': pb.steps,
+            'run_id': run_id,
+            'completed_steps': completed,
+            'notes': notes,
+        })
+    return JsonResponse({'ok': True, 'playbooks': result})
+
+
+@login_required
+@require_POST
+def playbook_update_run(request, alert_pk, pb_pk):
+    """Toggle step completion and save notes."""
+    import json as json_mod
+    from .models import Playbook, PlaybookRun
+    alert    = get_object_or_404(Alert, pk=alert_pk)
+    playbook = get_object_or_404(Playbook, pk=pb_pk)
+    try:
+        data = json_mod.loads(request.body)
+    except Exception:
+        return JsonResponse({'ok': False, 'error': 'Invalid JSON'}, status=400)
+
+    run, _ = PlaybookRun.objects.get_or_create(
+        alert=alert, playbook=playbook,
+        defaults={'completed_by': request.user}
+    )
+    run.completed_steps = data.get('completed_steps', run.completed_steps)
+    run.notes           = data.get('notes', run.notes)
+    run.completed_by    = request.user
+    run.save()
+    total = len(playbook.steps)
+    done  = len(run.completed_steps)
+    return JsonResponse({'ok': True, 'done': done, 'total': total})
+
+
+@login_required
+def threat_intel_ip(request):
+    """AJAX — check arbitrary IP (from asset detail or manual lookup)."""
+    from .threat_intel import lookup_ip
+    ip = request.GET.get('ip', '').strip()
+    if not ip:
+        return JsonResponse({'ok': False, 'error': 'ip required'})
+    force = request.GET.get('force') == '1'
+    results = lookup_ip(ip, force=force)
+    data = []
+    for r in results:
+        data.append({
+            'provider': r.provider,
+            'is_malicious': r.is_malicious,
+            'score': r.score,
+            'country': r.country,
+            'isp': r.isp,
+            'domain': r.domain,
+            'checked_at': r.checked_at.strftime('%Y-%m-%d %H:%M'),
+        })
+    return JsonResponse({'ok': True, 'ip': ip, 'results': data})

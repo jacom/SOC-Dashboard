@@ -67,6 +67,12 @@
         <a href="/alerts/export/csv/?{% if filter_qs %}{{ filter_qs }}{% endif %}" class="btn btn-sm btn-outline-secondary" title="Export current filters to CSV">
             <i class="bi bi-download me-1"></i>CSV
         </a>
+        <a href="/alerts/suppress/" class="btn btn-sm btn-outline-warning" title="จัดการ Suppress Rules">
+            <i class="bi bi-bell-slash me-1"></i>Suppress Rules
+        </a>
+        <a href="/alerts/playbooks/" class="btn btn-sm btn-outline-info" title="จัดการ Response Playbooks">
+            <i class="bi bi-check2-square me-1"></i>Playbooks
+        </a>
 
         <div class="d-flex align-items-center gap-1 flex-wrap">
             <select id="fetch-hours" class="form-select form-select-sm" style="width:auto;"
@@ -247,6 +253,10 @@
                                 <a href="/alerts/{{ alert.id }}/" class="btn btn-sm btn-outline-secondary" title="View detail">
                                     <i class="bi bi-eye"></i>
                                 </a>
+                                <button class="btn btn-sm btn-outline-warning" title="Suppress — ปิดการแจ้งเตือนสำหรับ rule นี้"
+                                        onclick="openSuppressModal('{{ alert.rule_id|escapejs }}', '{{ alert.agent_ip|default:''|escapejs }}', '{{ alert.rule_description|truncatechars:60|escapejs }}')">
+                                    <i class="bi bi-bell-slash"></i>
+                                </button>
                                 {% if show_dismissed %}
                                 <button class="btn btn-sm btn-outline-success" title="Restore alert"
                                         onclick="restoreAlert({{ alert.id }})">
@@ -321,6 +331,52 @@
     </p>
 </nav>
 {% endif %}
+
+<!-- Suppress Modal -->
+<div class="modal fade" id="suppressModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content" style="background:#161b22; border:1px solid #30363d;">
+            <div class="modal-header" style="border-bottom:1px solid #30363d;">
+                <h5 class="modal-title">
+                    <i class="bi bi-bell-slash me-2 text-warning"></i>ปิดการแจ้งเตือน (Suppress)
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3 p-2 rounded" style="background:#0d1117; border:1px solid #30363d; font-size:0.85rem;">
+                    <div class="text-muted mb-1">Alert ที่เลือก:</div>
+                    <div id="suppress-desc" style="color:#c9d1d9;"></div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label" style="font-size:0.85rem; color:#8b949e;">Rule ID</label>
+                    <input type="text" id="suppress-rule-id" class="form-control form-control-sm" readonly
+                           style="background:#0d1117; color:#79c0ff; border-color:#30363d;">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label" style="font-size:0.85rem; color:#8b949e;">
+                        Agent IP
+                        <span class="text-muted ms-1" style="font-size:0.78rem;">(ล้างค่าเพื่อ suppress ทุก agent)</span>
+                    </label>
+                    <input type="text" id="suppress-agent-ip" class="form-control form-control-sm"
+                           style="background:#0d1117; color:#79c0ff; border-color:#30363d;">
+                </div>
+                <div class="mb-2">
+                    <label class="form-label" style="font-size:0.85rem; color:#8b949e;">เหตุผล</label>
+                    <input type="text" id="suppress-reason" class="form-control form-control-sm"
+                           placeholder="เช่น false positive / โปรแกรมภายใน / ยอมรับความเสี่ยงแล้ว"
+                           style="background:#0d1117; color:#c9d1d9; border-color:#30363d;">
+                </div>
+                <div id="suppress-modal-result" class="mt-2 small" style="display:none;"></div>
+            </div>
+            <div class="modal-footer" style="border-top:1px solid #30363d;">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+                <button type="button" class="btn btn-warning" id="suppress-confirm-btn" onclick="confirmSuppress()">
+                    <i class="bi bi-bell-slash me-1"></i>ปิดการแจ้งเตือน
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_scripts %}
@@ -381,6 +437,63 @@ document.getElementById('fetch-btn').addEventListener('click', async function ()
 
 // ─── Bulk dismiss / undismiss ─────────────────────────────────────────
 const csrfToken = '{{ csrf_token }}';
+
+// ─── Suppress Modal ────────────────────────────────────────────────────────────
+let _suppressModal = null;
+
+function openSuppressModal(ruleId, agentIp, desc) {
+    document.getElementById('suppress-rule-id').value  = ruleId;
+    document.getElementById('suppress-agent-ip').value = agentIp;
+    document.getElementById('suppress-reason').value   = '';
+    document.getElementById('suppress-desc').textContent = desc;
+    document.getElementById('suppress-modal-result').style.display = 'none';
+    document.getElementById('suppress-confirm-btn').disabled = false;
+    document.getElementById('suppress-confirm-btn').innerHTML = '<i class="bi bi-bell-slash me-1"></i>ปิดการแจ้งเตือน';
+    _suppressModal = new bootstrap.Modal(document.getElementById('suppressModal'));
+    _suppressModal.show();
+}
+
+async function confirmSuppress() {
+    const ruleId  = document.getElementById('suppress-rule-id').value.trim();
+    const agentIp = document.getElementById('suppress-agent-ip').value.trim();
+    const reason  = document.getElementById('suppress-reason').value.trim();
+    const btn     = document.getElementById('suppress-confirm-btn');
+    const resultEl = document.getElementById('suppress-modal-result');
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>กำลังบันทึก…';
+
+    const fd = new FormData();
+    fd.append('rule_id',  ruleId);
+    fd.append('agent_ip', agentIp);
+    fd.append('reason',   reason || 'ปิดจากหน้า Alert List');
+
+    try {
+        const resp = await fetch('/alerts/suppress/add/', { method: 'POST', headers: {'X-CSRFToken': csrfToken}, body: fd });
+        const data = await resp.json();
+        if (data.ok) {
+            resultEl.style.display = 'block';
+            const target = agentIp ? `Agent ${agentIp}` : 'ทุก Agent';
+            resultEl.innerHTML = `<span class="text-success"><i class="bi bi-check-circle-fill me-1"></i>
+                บันทึกแล้ว — Rule <strong>${ruleId}</strong> / <strong>${target}</strong>
+                จะไม่ถูกแจ้งเตือนอีก
+                &nbsp;<a href="/alerts/suppress/" target="_blank" style="color:#58a6ff;">ดูทั้งหมด →</a>
+            </span>`;
+            btn.innerHTML = '<i class="bi bi-check-circle-fill me-1"></i>บันทึกแล้ว';
+            setTimeout(() => { if (_suppressModal) _suppressModal.hide(); }, 2000);
+        } else {
+            resultEl.style.display = 'block';
+            resultEl.innerHTML = `<span class="text-danger">${data.error}</span>`;
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-bell-slash me-1"></i>ปิดการแจ้งเตือน';
+        }
+    } catch(e) {
+        resultEl.style.display = 'block';
+        resultEl.innerHTML = '<span class="text-danger">Request failed</span>';
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-bell-slash me-1"></i>ปิดการแจ้งเตือน';
+    }
+}
 
 document.getElementById('check-all').addEventListener('change', function() {
     document.querySelectorAll('.alert-check').forEach(cb => {

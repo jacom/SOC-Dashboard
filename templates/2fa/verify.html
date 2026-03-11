@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ยืนยัน 2FA — SOC Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #0d1117;
+            color: #c9d1d9;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .card-2fa {
+            background-color: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            width: 100%;
+            max-width: 380px;
+            padding: 2.5rem 2rem;
+        }
+        .form-control {
+            background-color: #21262d;
+            border-color: #30363d;
+            color: #c9d1d9;
+            text-align: center;
+            font-size: 1.8rem;
+            letter-spacing: 0.5rem;
+            padding: 0.8rem;
+        }
+        .form-control:focus {
+            background-color: #21262d;
+            border-color: #58a6ff;
+            color: #c9d1d9;
+            box-shadow: 0 0 0 0.2rem rgba(88,166,255,.25);
+        }
+        .form-control::placeholder { color: #6e7681; letter-spacing: 0.3rem; }
+        .btn-primary { background-color: #238636; border-color: #238636; }
+        .btn-primary:hover { background-color: #2ea043; border-color: #2ea043; }
+        .error-box {
+            background-color: #3d1717;
+            border: 1px solid #da3633;
+            border-radius: 6px;
+            color: #ff7b72;
+            font-size: 0.85rem;
+            padding: 0.65rem 0.9rem;
+        }
+    </style>
+</head>
+<body>
+<div class="card-2fa">
+    <div class="text-center mb-4">
+        <div style="font-size:3rem;color:#58a6ff;"><i class="bi bi-shield-lock-fill"></i></div>
+        <h5 class="mt-2 fw-bold text-white">Two-Factor Authentication</h5>
+        <p class="text-secondary small">กรอกรหัส 6 หลักจาก Authenticator App</p>
+    </div>
+
+    {% if error %}
+    <div class="error-box mb-3">
+        <i class="bi bi-exclamation-circle me-1"></i>{{ error }}
+    </div>
+    {% endif %}
+
+    <form method="post">
+        {% csrf_token %}
+        <div class="mb-4">
+            <input type="text" name="code" class="form-control" placeholder="••••••"
+                   maxlength="6" inputmode="numeric" pattern="[0-9]{6}"
+                   autocomplete="one-time-code" autofocus required>
+        </div>
+        <button type="submit" class="btn btn-primary w-100 py-2">
+            <i class="bi bi-unlock me-1"></i>ยืนยัน
+        </button>
+        <input type="hidden" name="next" value="{{ request.GET.next }}">
+    </form>
+
+    <div class="text-center mt-3">
+        <a href="/logout/" class="text-secondary small">
+            <i class="bi bi-box-arrow-left me-1"></i>ออกจากระบบ
+        </a>
+    </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

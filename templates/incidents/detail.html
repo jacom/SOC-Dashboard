@@ -277,6 +277,85 @@
         </div>
         {% endif %}
 
+        <!-- Linked Vulnerabilities -->
+        <div class="card mb-3" id="vuln-card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-shield-exclamation me-2 text-warning"></i>CVE / Vulnerabilities ที่เกี่ยวข้อง</span>
+                <button class="btn btn-sm btn-outline-warning" onclick="toggleVulnSearch()">
+                    <i class="bi bi-plus-lg me-1"></i>เพิ่ม CVE
+                </button>
+            </div>
+            <!-- Search box (hidden by default) -->
+            <div id="vuln-search-box" class="px-3 pt-3 pb-1" style="display:none; border-bottom:1px solid #30363d;">
+                <div class="input-group input-group-sm mb-2">
+                    <span class="input-group-text"><i class="bi bi-search"></i></span>
+                    <input type="text" id="vuln-search-input" class="form-control"
+                           placeholder="ค้นหาด้วย CVE-ID, ชื่อ, Agent IP…" oninput="searchVulns(this.value)">
+                </div>
+                <div id="vuln-search-results" style="max-height:220px; overflow-y:auto;"></div>
+            </div>
+            <div class="card-body p-0">
+                <!-- Linked list -->
+                <table class="table table-hover mb-0" style="font-size:.83rem;" id="linked-vuln-table">
+                    <tbody id="linked-vuln-body">
+                        {% for v in incident.vulnerabilities.all %}
+                        <tr id="vrow-{{ v.pk }}">
+                            <td style="width:90px;">
+                                <span class="badge bg-{{ v.severity_color }}">{{ v.severity }}</span>
+                            </td>
+                            <td>
+                                {% if v.cve_id %}<code class="text-warning me-1">{{ v.cve_id }}</code>{% endif %}
+                                {{ v.title|truncatechars:60 }}
+                                {% if v.agent_ip %}<br><small class="text-muted">{{ v.agent_ip }}</small>{% endif %}
+                            </td>
+                            <td style="width:90px;">
+                                <span class="badge" style="background:#21262d; color:#8b949e;">{{ v.get_status_display }}</span>
+                            </td>
+                            <td style="width:35px;">
+                                <a href="/vulnerabilities/{{ v.pk }}/" target="_blank" class="btn btn-xs btn-outline-secondary p-0 px-1" title="ดูรายละเอียด">
+                                    <i class="bi bi-box-arrow-up-right" style="font-size:.7rem;"></i>
+                                </a>
+                            </td>
+                            <td style="width:35px;">
+                                <button class="btn btn-xs btn-outline-danger p-0 px-1" title="ลบ link"
+                                        onclick="unlinkVuln({{ v.pk }})">
+                                    <i class="bi bi-x-lg" style="font-size:.7rem;"></i>
+                                </button>
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr id="vuln-empty-row">
+                            <td colspan="5" class="text-center text-muted py-3" style="font-size:.83rem;">
+                                <i class="bi bi-shield-check me-1"></i>ยังไม่มี CVE ที่ link ไว้
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <!-- Auto-suggested from same agent_ip -->
+                {% if suggested_vulns %}
+                <div class="px-3 py-2" style="border-top:1px solid #30363d; background:#0d1117;">
+                    <div class="text-muted mb-1" style="font-size:.75rem; text-transform:uppercase; letter-spacing:.05em;">
+                        <i class="bi bi-lightbulb me-1 text-warning"></i>แนะนำ — CVE จาก Agent IP เดียวกัน ({{ incident.alert.agent_ip }})
+                    </div>
+                    {% for v in suggested_vulns %}
+                    <div class="d-flex align-items-center gap-2 mb-1" style="font-size:.82rem;">
+                        <span class="badge bg-{{ v.severity_color }} flex-shrink-0">{{ v.severity }}</span>
+                        <span class="text-truncate flex-grow-1">
+                            {% if v.cve_id %}<code class="text-warning me-1">{{ v.cve_id }}</code>{% endif %}
+                            {{ v.title|truncatechars:50 }}
+                        </span>
+                        <button class="btn btn-xs btn-outline-success flex-shrink-0 px-2"
+                                onclick="linkVuln({{ v.pk }})">
+                            <i class="bi bi-plus-lg" style="font-size:.7rem;"></i> Link
+                        </button>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
         <!-- Quick Actions -->
         <div class="card mb-3">
             <div class="card-header"><i class="bi bi-lightning me-2"></i>Quick Actions</div>
@@ -322,6 +401,95 @@
 
 {% block extra_scripts %}
 <script>
+const CSRF = () => (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '';
+const INC_PK = {{ incident.pk }};
+
+// ── Vuln Link/Unlink ─────────────────────────────────────────────
+function toggleVulnSearch() {
+    const box = document.getElementById('vuln-search-box');
+    box.style.display = box.style.display === 'none' ? 'block' : 'none';
+    if (box.style.display === 'block') document.getElementById('vuln-search-input').focus();
+}
+
+let _searchTimer = null;
+function searchVulns(q) {
+    clearTimeout(_searchTimer);
+    _searchTimer = setTimeout(() => {
+        fetch(`/incidents/${INC_PK}/vuln-search/?q=${encodeURIComponent(q)}`)
+            .then(r => r.json()).then(data => renderSearchResults(data.results || []));
+    }, 300);
+}
+
+function renderSearchResults(results) {
+    const el = document.getElementById('vuln-search-results');
+    if (!results.length) { el.innerHTML = '<div class="text-muted small py-1">ไม่พบผล</div>'; return; }
+    el.innerHTML = results.map(v => `
+        <div class="d-flex align-items-center gap-2 py-1 border-bottom" style="border-color:#21262d!important; font-size:.82rem;">
+            <span class="badge bg-${sevColor(v.severity)} flex-shrink-0">${v.severity}</span>
+            <span class="flex-grow-1 text-truncate">
+                ${v.cve_id ? '<code class="text-warning me-1">' + v.cve_id + '</code>' : ''}
+                ${escHtml(v.title.substring(0, 55))}
+                ${v.agent_ip ? '<br><small class="text-muted">' + v.agent_ip + '</small>' : ''}
+            </span>
+            <button class="btn btn-xs btn-outline-success flex-shrink-0 px-2" onclick="linkVuln(${v.id})">
+                <i class="bi bi-plus-lg"></i>
+            </button>
+        </div>`).join('');
+}
+
+function linkVuln(vulnId) {
+    const fd = new FormData();
+    fd.append('vuln_id', vulnId);
+    fd.append('action', 'link');
+    fetch(`/incidents/${INC_PK}/vuln-link/`, {method:'POST', headers:{'X-CSRFToken': CSRF()}, body: fd})
+        .then(r => r.json()).then(data => {
+            if (data.ok) { addVulnRow(data); searchVulns(document.getElementById('vuln-search-input').value); }
+        });
+}
+
+function unlinkVuln(vulnId) {
+    const fd = new FormData();
+    fd.append('vuln_id', vulnId);
+    fd.append('action', 'unlink');
+    fetch(`/incidents/${INC_PK}/vuln-link/`, {method:'POST', headers:{'X-CSRFToken': CSRF()}, body: fd})
+        .then(r => r.json()).then(data => {
+            if (data.ok) {
+                const row = document.getElementById('vrow-' + vulnId);
+                if (row) row.remove();
+                if (!document.querySelector('#linked-vuln-body tr[id^="vrow-"]')) {
+                    document.getElementById('linked-vuln-body').innerHTML =
+                        '<tr id="vuln-empty-row"><td colspan="5" class="text-center text-muted py-3">' +
+                        '<i class="bi bi-shield-check me-1"></i>ยังไม่มี CVE ที่ link ไว้</td></tr>';
+                }
+            }
+        });
+}
+
+function addVulnRow(v) {
+    const tbody = document.getElementById('linked-vuln-body');
+    const empty = document.getElementById('vuln-empty-row');
+    if (empty) empty.remove();
+    if (document.getElementById('vrow-' + v.vuln_id)) return;
+    const tr = document.createElement('tr');
+    tr.id = 'vrow-' + v.vuln_id;
+    tr.innerHTML = `
+        <td><span class="badge bg-${sevColor(v.severity)}">${v.severity}</span></td>
+        <td>${v.cve_id ? '<code class="text-warning me-1">' + v.cve_id + '</code>' : ''}${escHtml(v.title.substring(0,60))}</td>
+        <td><span class="badge" style="background:#21262d;color:#8b949e;">${v.status}</span></td>
+        <td><a href="/vulnerabilities/${v.vuln_id}/" target="_blank" class="btn btn-xs btn-outline-secondary p-0 px-1">
+            <i class="bi bi-box-arrow-up-right" style="font-size:.7rem;"></i></a></td>
+        <td><button class="btn btn-xs btn-outline-danger p-0 px-1" onclick="unlinkVuln(${v.vuln_id})">
+            <i class="bi bi-x-lg" style="font-size:.7rem;"></i></button></td>`;
+    tbody.appendChild(tr);
+}
+
+function sevColor(s) {
+    return {CRITICAL:'danger', HIGH:'warning', MEDIUM:'info', LOW:'secondary'}[s] || 'secondary';
+}
+function escHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
 function showDeleteModal() {
     new bootstrap.Modal(document.getElementById('deleteModal')).show();
 }

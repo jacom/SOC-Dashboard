@@ -1,0 +1,386 @@
+{% extends 'base.html' %}
+{% block title %}Asset Register{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb mb-1" style="font-size:0.85rem;">
+                <li class="breadcrumb-item"><a href="/" style="color:#58a6ff;">Dashboard</a></li>
+                <li class="breadcrumb-item active" style="color:#8b949e;">Asset Register</li>
+            </ol>
+        </nav>
+        <h4 class="mb-0"><i class="bi bi-pc-display me-2" style="color:#58a6ff;"></i>Asset Register</h4>
+        <p class="text-muted mb-0" style="font-size:0.85rem;">ทะเบียนเครื่อง / อุปกรณ์ทั้งหมดในระบบ</p>
+    </div>
+    <button class="btn btn-sm btn-success" onclick="openAddModal()">
+        <i class="bi bi-plus-circle me-1"></i>เพิ่ม Asset
+    </button>
+</div>
+
+<!-- Search -->
+<form method="get" class="mb-3 d-flex gap-2">
+    <input type="text" name="q" value="{{ q }}" class="form-control form-control-sm" placeholder="ค้นหา IP, ชื่อเครื่อง, แผนก, ผู้ดูแล..." style="max-width:350px;">
+    <button type="submit" class="btn btn-sm btn-outline-secondary"><i class="bi bi-search"></i></button>
+    {% if q %}<a href="{% url 'assets:list' %}" class="btn btn-sm btn-outline-secondary">Clear</a>{% endif %}
+</form>
+
+<!-- Table -->
+<div class="card">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>Agent IP</th>
+                        <th>Agent Name</th>
+                        <th>Hostname</th>
+                        <th>ผู้ดูแล</th>
+                        <th>แผนก</th>
+                        <th>ประเภท</th>
+                        <th>Physical/VM</th>
+                        <th>Criticality</th>
+                        <th>Location</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="asset-tbody">
+                    {% for asset in assets %}
+                    <tr id="asset-row-{{ asset.pk }}">
+                        <td><code style="color:#79c0ff;">{{ asset.agent_ip }}</code></td>
+                        <td><small>{{ asset.agent_name|default:"—" }}</small></td>
+                        <td><small>{{ asset.hostname|default:"—" }}</small></td>
+                        <td><small>{{ asset.owner|default:"—" }}</small></td>
+                        <td><small>{{ asset.department|default:"—" }}</small></td>
+                        <td><small class="text-muted">{{ asset.get_asset_type_display }}</small></td>
+                        <td>
+                            {% if asset.machine_type == 'vm' %}
+                            <span class="badge" style="background:#1f3a6e; color:#79c0ff;">VM</span>
+                            {% else %}
+                            <span class="badge bg-secondary">Physical</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span class="badge bg-{{ asset.criticality_color }}">{{ asset.criticality }}</span>
+                        </td>
+                        <td><small class="text-muted">{{ asset.location|default:"—" }}</small></td>
+                        <td>
+                            <div class="d-flex gap-1">
+                                <a href="{% url 'assets:detail' asset.pk %}" class="btn btn-sm btn-outline-secondary" title="ดูรายละเอียด">
+                                    <i class="bi bi-eye"></i>
+                                </a>
+                                <button class="btn btn-sm btn-outline-primary" title="แก้ไข" onclick="openEditModal({{ asset.pk }})">
+                                    <i class="bi bi-pencil"></i>
+                                </button>
+                                <button class="btn btn-sm btn-outline-danger" title="ลบ" onclick="deleteAsset({{ asset.pk }})">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr id="empty-row">
+                        <td colspan="9" class="text-center text-muted py-5">
+                            <i class="bi bi-pc-display display-6 d-block mb-2"></i>
+                            ยังไม่มีข้อมูล Asset — คลิก <strong>เพิ่ม Asset</strong> เพื่อเริ่มต้น
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Add/Edit Modal -->
+<div class="modal fade" id="assetModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content" style="background:#161b22; border:1px solid #30363d;">
+            <div class="modal-header" style="border-color:#30363d;">
+                <h5 class="modal-title" id="modal-title">เพิ่ม Asset</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="edit-pk" value="">
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label class="form-label small text-muted">Agent IP <span class="text-danger">*</span></label>
+                        <select id="f-agent-ip" class="form-select form-select-sm" onchange="onAgentSelect(this)">
+                            <option value="">— กำลังโหลด... —</option>
+                        </select>
+                        <input type="text" id="f-agent-ip-text" class="form-control form-control-sm mt-1"
+                               placeholder="หรือพิมพ์ IP เอง เช่น 10.0.0.5" style="display:none;">
+                        <div class="form-check mt-1">
+                            <input class="form-check-input" type="checkbox" id="f-manual-ip" onchange="toggleManualIp(this)">
+                            <label class="form-check-label" for="f-manual-ip" style="font-size:.78rem; color:#8b949e;">พิมพ์ IP เอง</label>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small text-muted">Agent Name (Wazuh)</label>
+                        <input type="text" id="f-agent-name" class="form-control form-control-sm" placeholder="DESKTOP-ABC123">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small text-muted">Hostname จริง</label>
+                        <input type="text" id="f-hostname" class="form-control form-control-sm" placeholder="workstation-01">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small text-muted">ผู้ดูแล / เจ้าของ</label>
+                        <input type="text" id="f-owner" class="form-control form-control-sm" placeholder="ชื่อ-นามสกุล">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small text-muted">อีเมลผู้ดูแล <i class="bi bi-envelope text-info" title="ใช้รับแจ้งเตือน AI Vulnerability"></i></label>
+                        <input type="email" id="f-owner-email" class="form-control form-control-sm" placeholder="owner@example.com">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small text-muted">แผนก / หน่วยงาน</label>
+                        <input type="text" id="f-department" class="form-control form-control-sm" placeholder="ฝ่าย IT">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small text-muted">Location</label>
+                        <input type="text" id="f-location" class="form-control form-control-sm" placeholder="อาคาร A ชั้น 3">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small text-muted">ประเภท Asset</label>
+                        <select id="f-asset-type" class="form-select form-select-sm">
+                            <option value="workstation">Workstation</option>
+                            <option value="server">Server</option>
+                            <option value="network">Network Device</option>
+                            <option value="other">Other</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small text-muted">Physical / VM</label>
+                        <select id="f-machine-type" class="form-select form-select-sm">
+                            <option value="physical">Physical</option>
+                            <option value="vm">Virtual Machine (VM)</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small text-muted">Criticality</label>
+                        <select id="f-criticality" class="form-select form-select-sm">
+                            <option value="LOW">LOW</option>
+                            <option value="MEDIUM" selected>MEDIUM</option>
+                            <option value="HIGH">HIGH</option>
+                            <option value="CRITICAL">CRITICAL</option>
+                        </select>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label small text-muted">รูปภาพ Server / เครื่อง</label>
+                        <input type="file" id="f-image" class="form-control form-control-sm" accept="image/*" onchange="previewImage(this)">
+                        <div id="f-image-preview" class="mt-2" style="display:none;">
+                            <img id="f-image-thumb" src="" alt="preview"
+                                 style="max-height:120px; border-radius:6px; border:1px solid #30363d;">
+                            <button type="button" class="btn btn-sm btn-outline-danger ms-2" onclick="clearImage()">
+                                <i class="bi bi-x"></i> ลบรูป
+                            </button>
+                        </div>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label small text-muted">หมายเหตุ</label>
+                        <textarea id="f-notes" class="form-control form-control-sm" rows="2" placeholder="ข้อมูลเพิ่มเติม..."></textarea>
+                    </div>
+                </div>
+                <div id="modal-result" class="mt-2 small" style="display:none;"></div>
+            </div>
+            <div class="modal-footer" style="border-color:#30363d;">
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+                <button type="button" class="btn btn-sm btn-success" onclick="saveAsset()">
+                    <i class="bi bi-check-circle me-1"></i>บันทึก
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const csrfToken = (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '';
+const CRIT_COLOR = {CRITICAL:'danger', HIGH:'warning', MEDIUM:'info', LOW:'secondary'};
+const TYPE_LABEL = {server:'Server', workstation:'Workstation', network:'Network Device', other:'Other'};
+let assetModal;
+
+// agent data loaded from API
+let agentMap = {}; // ip -> name
+
+document.addEventListener('DOMContentLoaded', () => {
+    assetModal = new bootstrap.Modal(document.getElementById('assetModal'));
+    loadAgentChoices();
+});
+
+async function loadAgentChoices() {
+    const sel = document.getElementById('f-agent-ip');
+    try {
+        const resp = await fetch('/assets/agents/');
+        const data = await resp.json();
+        agentMap = {};
+        sel.innerHTML = '<option value="">— เลือก Agent IP —</option>';
+        let hasUnregistered = false;
+        data.agents.forEach(a => {
+            agentMap[a.ip] = a.name;
+            if (!a.registered) {
+                hasUnregistered = true;
+                const opt = document.createElement('option');
+                opt.value = a.ip;
+                opt.textContent = a.name ? `${a.ip}  (${a.name})` : a.ip;
+                sel.appendChild(opt);
+            }
+        });
+        if (!hasUnregistered) {
+            sel.innerHTML = '<option value="">— ทุก Agent ลงทะเบียนแล้ว —</option>';
+        }
+    } catch(e) {
+        sel.innerHTML = '<option value="">— โหลดไม่ได้ —</option>';
+    }
+}
+
+function onAgentSelect(sel) {
+    const ip = sel.value;
+    if (ip && agentMap[ip] !== undefined) {
+        document.getElementById('f-agent-name').value = agentMap[ip] || '';
+    }
+}
+
+function toggleManualIp(cb) {
+    const sel     = document.getElementById('f-agent-ip');
+    const textBox = document.getElementById('f-agent-ip-text');
+    if (cb.checked) {
+        sel.style.display = 'none';
+        textBox.style.display = '';
+    } else {
+        sel.style.display = '';
+        textBox.style.display = 'none';
+    }
+}
+
+function _getAgentIp() {
+    const manual = document.getElementById('f-manual-ip').checked;
+    if (manual) return document.getElementById('f-agent-ip-text').value.trim();
+    return document.getElementById('f-agent-ip').value.trim();
+}
+
+function openAddModal() {
+    document.getElementById('modal-title').textContent = 'เพิ่ม Asset';
+    document.getElementById('edit-pk').value = '';
+    document.getElementById('f-agent-ip').value = '';
+    document.getElementById('f-agent-ip').style.display = '';
+    document.getElementById('f-agent-ip').disabled = false;
+    document.getElementById('f-agent-ip-text').value = '';
+    document.getElementById('f-agent-ip-text').style.display = 'none';
+    document.getElementById('f-manual-ip').checked = false;
+    ['agent-name','hostname','owner','owner-email','department','location','notes'].forEach(id => {
+        document.getElementById('f-'+id).value = '';
+    });
+    document.getElementById('f-asset-type').value = 'workstation';
+    document.getElementById('f-machine-type').value = 'physical';
+    document.getElementById('f-criticality').value = 'MEDIUM';
+    document.getElementById('f-image').value = '';
+    document.getElementById('f-image-preview').style.display = 'none';
+    document.getElementById('modal-result').style.display = 'none';
+    assetModal.show();
+}
+
+async function openEditModal(pk) {
+    const resp = await fetch(`/assets/${pk}/edit/`);
+    const data = await resp.json();
+    if (!data.ok) return;
+    document.getElementById('modal-title').textContent = 'แก้ไข Asset';
+    document.getElementById('edit-pk').value = pk;
+    // ในโหมด edit ให้แสดง IP เป็น text ที่ disabled (ไม่ใช่ select)
+    const sel = document.getElementById('f-agent-ip');
+    sel.innerHTML = `<option value="${data.agent_ip}">${data.agent_ip}</option>`;
+    sel.value = data.agent_ip;
+    sel.disabled = true;
+    sel.style.display = '';
+    document.getElementById('f-agent-ip-text').style.display = 'none';
+    document.getElementById('f-manual-ip').checked = false;
+    document.getElementById('f-agent-name').value = data.agent_name || '';
+    document.getElementById('f-hostname').value = data.hostname || '';
+    document.getElementById('f-owner').value = data.owner || '';
+    document.getElementById('f-owner-email').value = data.owner_email || '';
+    document.getElementById('f-department').value = data.department || '';
+    document.getElementById('f-location').value = data.location || '';
+    document.getElementById('f-asset-type').value = data.asset_type || 'workstation';
+    document.getElementById('f-machine-type').value = data.machine_type || 'physical';
+    document.getElementById('f-criticality').value = data.criticality || 'MEDIUM';
+    document.getElementById('f-notes').value = data.notes || '';
+    // show existing image if any
+    document.getElementById('f-image').value = '';
+    if (data.image_url) {
+        document.getElementById('f-image-thumb').src = data.image_url;
+        document.getElementById('f-image-preview').style.display = '';
+    } else {
+        document.getElementById('f-image-preview').style.display = 'none';
+    }
+    document.getElementById('modal-result').style.display = 'none';
+    assetModal.show();
+}
+
+function previewImage(input) {
+    if (input.files && input.files[0]) {
+        const reader = new FileReader();
+        reader.onload = e => {
+            document.getElementById('f-image-thumb').src = e.target.result;
+            document.getElementById('f-image-preview').style.display = '';
+        };
+        reader.readAsDataURL(input.files[0]);
+    }
+}
+
+function clearImage() {
+    document.getElementById('f-image').value = '';
+    document.getElementById('f-image-preview').style.display = 'none';
+}
+
+async function saveAsset() {
+    const pk = document.getElementById('edit-pk').value;
+    const fd = new FormData();
+    fd.append('agent_ip',    pk ? document.getElementById('f-agent-ip').value.trim() : _getAgentIp());
+    fd.append('agent_name',  document.getElementById('f-agent-name').value.trim());
+    fd.append('hostname',    document.getElementById('f-hostname').value.trim());
+    fd.append('owner',       document.getElementById('f-owner').value.trim());
+    fd.append('owner_email', document.getElementById('f-owner-email').value.trim());
+    fd.append('department',  document.getElementById('f-department').value.trim());
+    fd.append('location',    document.getElementById('f-location').value.trim());
+    fd.append('asset_type',  document.getElementById('f-asset-type').value);
+    fd.append('machine_type',document.getElementById('f-machine-type').value);
+    fd.append('criticality', document.getElementById('f-criticality').value);
+    fd.append('notes',       document.getElementById('f-notes').value.trim());
+    const imageFile = document.getElementById('f-image').files[0];
+    if (imageFile) fd.append('image', imageFile);
+
+    const resultEl = document.getElementById('modal-result');
+    const url = pk ? `/assets/${pk}/edit/` : '/assets/add/';
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: {'X-CSRFToken': csrfToken},
+        body: fd,
+    });
+    const data = await resp.json();
+    if (data.ok) {
+        assetModal.hide();
+        location.reload();
+    } else {
+        resultEl.style.display = 'block';
+        resultEl.innerHTML = `<span class="text-danger">${data.error || 'เกิดข้อผิดพลาด'}</span>`;
+    }
+}
+
+async function deleteAsset(pk) {
+    if (!confirm('ลบ Asset นี้?')) return;
+    const resp = await fetch(`/assets/${pk}/delete/`, {
+        method: 'POST', headers: {'X-CSRFToken': csrfToken}
+    });
+    const data = await resp.json();
+    if (data.ok) {
+        const row = document.getElementById(`asset-row-${pk}`);
+        if (row) row.remove();
+        if (!document.querySelector('#asset-tbody tr:not(#empty-row)')) {
+            document.getElementById('asset-tbody').innerHTML = `
+                <tr id="empty-row"><td colspan="9" class="text-center text-muted py-5">
+                <i class="bi bi-pc-display display-6 d-block mb-2"></i>ยังไม่มีข้อมูล Asset</td></tr>`;
+        }
+    }
+}
+</script>
+{% endblock %}

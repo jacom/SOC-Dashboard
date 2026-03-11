@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block title %}Audit Log — SOC Dashboard{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="mb-0"><i class="bi bi-journal-text me-2" style="color:#58a6ff;"></i>Audit Log</h5>
+    <span class="text-muted small">บันทึกการกระทำทั้งหมดในระบบ</span>
+</div>
+
+<!-- Filter -->
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <form method="get" class="row g-2 align-items-end">
+            <div class="col-md-3">
+                <label class="form-label small text-muted mb-1">Action</label>
+                <select name="action" class="form-select form-select-sm">
+                    <option value="">ทั้งหมด</option>
+                    {% for val, label in action_choices %}
+                    <option value="{{ val }}" {% if action_filter == val %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small text-muted mb-1">ผู้ใช้</label>
+                <input type="text" name="user" class="form-control form-control-sm"
+                       value="{{ user_filter }}" placeholder="username">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small text-muted mb-1">จากวันที่</label>
+                <input type="date" name="date_from" class="form-control form-control-sm" value="{{ date_from }}">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small text-muted mb-1">ถึงวันที่</label>
+                <input type="date" name="date_to" class="form-control form-control-sm" value="{{ date_to }}">
+            </div>
+            <div class="col-md-3 d-flex gap-2">
+                <button type="submit" class="btn btn-primary btn-sm">
+                    <i class="bi bi-search me-1"></i>ค้นหา
+                </button>
+                <a href="/audit/" class="btn btn-outline-secondary btn-sm">ล้าง</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Table -->
+<div class="card">
+    <div class="card-body p-0">
+        <table class="table table-hover mb-0" style="font-size:0.85rem;">
+            <thead>
+                <tr>
+                    <th style="width:160px;">เวลา</th>
+                    <th style="width:120px;">ผู้ใช้</th>
+                    <th style="width:80px;">Role</th>
+                    <th style="width:180px;">Action</th>
+                    <th>รายละเอียด</th>
+                    <th style="width:120px;">IP Address</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for log in logs %}
+                <tr>
+                    <td class="text-muted">
+                        <small>{{ log.timestamp|date:"d/m/Y H:i:s" }}</small>
+                    </td>
+                    <td>
+                        {% if log.user %}
+                            <strong>{{ log.user.username }}</strong>
+                        {% else %}
+                            <span class="text-muted">—</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if log.user %}
+                            {% with role=log.user.profile.role %}
+                            {% if role == 'admin' %}
+                                <span class="badge bg-danger">Admin</span>
+                            {% elif role == 'analyst' %}
+                                <span class="badge bg-primary">Analyst</span>
+                            {% else %}
+                                <span class="badge bg-secondary">Viewer</span>
+                            {% endif %}
+                            {% endwith %}
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if 'dismiss' in log.action %}
+                            <span class="badge bg-secondary">{{ log.get_action_display }}</span>
+                        {% elif 'delete' in log.action %}
+                            <span class="badge bg-danger">{{ log.get_action_display }}</span>
+                        {% elif 'add' in log.action or 'create' in log.action %}
+                            <span class="badge bg-success">{{ log.get_action_display }}</span>
+                        {% elif 'status' in log.action %}
+                            <span class="badge bg-warning text-dark">{{ log.get_action_display }}</span>
+                        {% elif 'login' in log.action %}
+                            <span class="badge bg-info text-dark">{{ log.get_action_display }}</span>
+                        {% else %}
+                            <span class="badge bg-primary">{{ log.get_action_display }}</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span style="color:#c9d1d9;">{{ log.detail|default:"—" }}</span>
+                        {% if log.target_type and log.target_id %}
+                            <small class="text-muted ms-2">[{{ log.target_type }} #{{ log.target_id }}]</small>
+                        {% endif %}
+                    </td>
+                    <td class="text-muted"><small>{{ log.ip_address|default:"—" }}</small></td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="6" class="text-center text-muted py-4">
+                        <i class="bi bi-journal-x d-block mb-2" style="font-size:1.5rem;"></i>
+                        ไม่พบ Audit Log
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Pagination -->
+{% if logs.has_other_pages %}
+<nav class="mt-3">
+    <ul class="pagination pagination-sm justify-content-center">
+        {% if logs.has_previous %}
+        <li class="page-item">
+            <a class="page-link" href="?page={{ logs.previous_page_number }}&action={{ action_filter }}&user={{ user_filter }}&date_from={{ date_from }}&date_to={{ date_to }}">‹</a>
+        </li>
+        {% endif %}
+        {% for p in logs.paginator.page_range %}
+        <li class="page-item {% if p == logs.number %}active{% endif %}">
+            <a class="page-link" href="?page={{ p }}&action={{ action_filter }}&user={{ user_filter }}&date_from={{ date_from }}&date_to={{ date_to }}">{{ p }}</a>
+        </li>
+        {% endfor %}
+        {% if logs.has_next %}
+        <li class="page-item">
+            <a class="page-link" href="?page={{ logs.next_page_number }}&action={{ action_filter }}&user={{ user_filter }}&date_from={{ date_from }}&date_to={{ date_to }}">›</a>
+        </li>
+        {% endif %}
+    </ul>
+</nav>
+{% endif %}
+{% endblock %}
