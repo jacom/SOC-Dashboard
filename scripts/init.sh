@@ -86,13 +86,136 @@ EOF
     ok ".env สร้างเรียบร้อย"
 fi
 
-# ── ตรวจสอบ Docker ────────────────────────────────────────────────────────────
+# ── ตรวจสอบ OS ────────────────────────────────────────────────────────────────
+_detect_os() {
+    if [[ -f /etc/os-release ]]; then
+        . /etc/os-release
+        case "${ID,,}" in
+            ubuntu|debian)           OS_TYPE="ubuntu" ;;
+            almalinux|rhel|centos|rocky) OS_TYPE="almalinux" ;;
+            *)                       OS_TYPE="unknown" ;;
+        esac
+        OS_NAME="${PRETTY_NAME:-$ID}"
+    else
+        OS_TYPE="unknown"
+        OS_NAME="Unknown OS"
+    fi
+}
+
+_detect_os
+info "ตรวจพบ OS: ${OS_NAME}"
+
+if [[ "$OS_TYPE" == "unknown" ]]; then
+    warn "OS ไม่รองรับการติดตั้งอัตโนมัติ (รองรับ: Ubuntu, AlmaLinux/RHEL)"
+fi
+
+# ── ตรวจสอบและติดตั้ง Docker ─────────────────────────────────────────────────
+_install_docker() {
+    info "ติดตั้ง Docker..."
+    if ! command -v curl &>/dev/null; then
+        if [[ "$OS_TYPE" == "ubuntu" ]]; then
+            apt-get update -qq && apt-get install -y curl
+        elif [[ "$OS_TYPE" == "almalinux" ]]; then
+            dnf install -y curl
+        else
+            err "ไม่พบ curl — กรุณาติดตั้งก่อน"
+        fi
+    fi
+
+    if [[ "$OS_TYPE" == "ubuntu" ]]; then
+        # Ubuntu: ติดตั้งผ่าน official Docker apt repo
+        apt-get update -qq
+        apt-get install -y ca-certificates curl gnupg
+        install -m 0755 -d /etc/apt/keyrings
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+            | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+        chmod a+r /etc/apt/keyrings/docker.gpg
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+            > /etc/apt/sources.list.d/docker.list
+        apt-get update -qq
+        apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+
+    elif [[ "$OS_TYPE" == "almalinux" ]]; then
+        # AlmaLinux/RHEL: ติดตั้งผ่าน official Docker dnf repo
+        dnf install -y dnf-plugins-core
+        dnf config-manager --add-repo https://download.docker.com/linux/rhel/docker-ce.repo
+        dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+
+    else
+        # Fallback: convenience script
+        curl -fsSL https://get.docker.com | sh
+    fi
+
+    systemctl enable --now docker
+    ok "Docker ติดตั้งเสร็จสิ้น"
+}
+
 if ! command -v docker &>/dev/null; then
-    err "ไม่พบ Docker — กรุณาติดตั้งก่อน: https://docs.docker.com/engine/install/"
+    warn "ไม่พบ Docker — จะติดตั้งอัตโนมัติ"
+    read -rp "  ยืนยันติดตั้ง Docker? [Y/n]: " _ANS
+    _ANS="${_ANS:-y}"
+    if [[ "${_ANS,,}" == "y" ]]; then
+        _install_docker
+    else
+        err "ต้องการ Docker เพื่อดำเนินการต่อ — https://docs.docker.com/engine/install/"
+    fi
 fi
-if ! docker compose version &>/dev/null; then
-    err "ไม่พบ Docker Compose plugin — กรุณาติดตั้งก่อน"
+
+_install_compose_plugin() {
+    if [[ "$OS_TYPE" == "ubuntu" ]]; then
+        # เพิ่ม Docker apt repo ก่อน (กรณี Docker ติดตั้งมาจากช่องทางอื่น)
+        if [[ ! -f /etc/apt/keyrings/docker.gpg ]]; then
+            info "เพิ่ม Docker apt repo..."
+            apt-get install -y ca-certificates curl gnupg
+            install -m 0755 -d /etc/apt/keyrings
+            curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+                | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+            chmod a+r /etc/apt/keyrings/docker.gpg
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+                > /etc/apt/sources.list.d/docker.list
+            apt-get update -qq
+        fi
+        apt-get install -y docker-compose-plugin && return 0
+
+    elif [[ "$OS_TYPE" == "almalinux" ]]; then
+        if ! dnf repolist | grep -q docker-ce; then
+            info "เพิ่ม Docker dnf repo..."
+            dnf install -y dnf-plugins-core
+            dnf config-manager --add-repo https://download.docker.com/linux/rhel/docker-ce.repo
+        fi
+        dnf install -y docker-compose-plugin && return 0
+    fi
+
+    # Fallback: download binary ตรง
+    info "ติดตั้ง Docker Compose แบบ binary..."
+    local COMPOSE_VERSION
+    COMPOSE_VERSION=$(curl -fsSL https://api.github.com/repos/docker/compose/releases/latest \
+        | grep '"tag_name"' | cut -d'"' -f4)
+    local COMPOSE_URL="https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-$(uname -m)"
+    mkdir -p /usr/local/lib/docker/cli-plugins
+    curl -fsSL "$COMPOSE_URL" -o /usr/local/lib/docker/cli-plugins/docker-compose
+    chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+}
+
+if ! docker compose version &>/dev/null 2>&1; then
+    warn "ไม่พบ Docker Compose plugin — จะติดตั้งอัตโนมัติ"
+    read -rp "  ยืนยันติดตั้ง? [Y/n]: " _ANS2
+    _ANS2="${_ANS2:-y}"
+    if [[ "${_ANS2,,}" == "y" ]]; then
+        _install_compose_plugin
+        if ! docker compose version &>/dev/null 2>&1; then
+            err "ติดตั้ง Docker Compose ไม่สำเร็จ — https://docs.docker.com/compose/install/"
+        fi
+        ok "Docker Compose plugin ติดตั้งเสร็จสิ้น"
+    else
+        err "ต้องการ Docker Compose เพื่อดำเนินการต่อ"
+    fi
 fi
+
+ok "Docker $(docker --version | awk '{print $3}' | tr -d ',')"
+ok "Docker Compose $(docker compose version --short 2>/dev/null || echo 'OK')"
 
 # ── Docker Compose Up ─────────────────────────────────────────────────────────
 info "Starting Docker Compose stack..."

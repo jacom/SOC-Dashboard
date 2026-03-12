@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     'apps.assets',
     'apps.vulnerabilities',
     'apps.sla',
+    'apps.api',
 ]
 
 MIDDLEWARE = [

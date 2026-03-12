@@ -710,11 +710,25 @@ def restart_bot(request):
 
 
 # ── Wazuh Config Check ─────────────────────────────────────────────────────────
+def _get_wazuh_indexer_cfg():
+    """อ่าน Wazuh Indexer config จาก DB (IntegrationConfig) ที่ตั้งค่าผ่าน Settings UI"""
+    cfg = {c.key: c.value for c in IntegrationConfig.objects.filter(
+        key__in=['WAZUH_INDEXER_URL', 'WAZUH_INDEXER_USER', 'WAZUH_INDEXER_PASSWORD', 'WAZUH_VULN_INDEX']
+    )}
+    return (
+        cfg.get('WAZUH_INDEXER_URL', _settings.WAZUH_INDEXER_URL),
+        cfg.get('WAZUH_INDEXER_USER', _settings.WAZUH_INDEXER_USERNAME),
+        cfg.get('WAZUH_INDEXER_PASSWORD', _settings.WAZUH_INDEXER_PASSWORD),
+        cfg.get('WAZUH_VULN_INDEX', _settings.WAZUH_VULN_INDEX),
+    )
+
+
 @login_required
 def wazuh_config_check(request):
+    idx_url, _, _, vuln_idx = _get_wazuh_indexer_cfg()
     return render(request, 'config/wazuh_config.html', {
-        'indexer_url':  _settings.WAZUH_INDEXER_URL,
-        'vuln_index':   _settings.WAZUH_VULN_INDEX,
+        'indexer_url':   idx_url,
+        'vuln_index':    vuln_idx,
         'dashboard_url': _settings.DASHBOARD_URL,
     })
 
@@ -726,10 +740,8 @@ def wazuh_probe(request):
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
 
-    idx_url  = _settings.WAZUH_INDEXER_URL.rstrip('/')
-    idx_user = _settings.WAZUH_INDEXER_USERNAME
-    idx_pass = _settings.WAZUH_INDEXER_PASSWORD
-    vuln_idx = _settings.WAZUH_VULN_INDEX
+    idx_url, idx_user, idx_pass, vuln_idx = _get_wazuh_indexer_cfg()
+    idx_url = idx_url.rstrip('/')
 
     results = []
 

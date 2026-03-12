@@ -205,9 +205,18 @@ def fetch_and_save(hours: int = 1, min_level: int = 3, limit: int = 500) -> dict
             )
             if created:
                 stats['created'] += 1
-                if alert.severity in ('CRITICAL', 'HIGH'):
+                # enqueue pipeline เฉพาะ alert ที่เกิดขึ้นภายใน 2 ชั่วโมงที่ผ่านมา
+                # ป้องกัน alert เก่าที่เพิ่งเข้า DB (เช่น หลัง DB reset หรือ fetch ด้วย hours ใหญ่)
+                # ไม่ถูกส่งแจ้งเตือนย้อนหลัง
+                alert_age_h = (datetime.now(timezone.utc) - alert.timestamp).total_seconds() / 3600
+                if alert.severity in ('CRITICAL', 'HIGH') and alert_age_h <= 2:
                     from .pipeline import enqueue_pipeline
                     enqueue_pipeline(alert)
+                elif alert_age_h > 2:
+                    logger.info(
+                        f'Fetcher: alert {alert.id} saved to DB but skip pipeline '
+                        f'(age={alert_age_h:.1f}h > 2h)'
+                    )
             else:
                 stats['skipped'] += 1
         except Exception as e:

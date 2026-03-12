@@ -24,4 +24,5 @@ urlpatterns = [
     path('assets/', include('apps.assets.urls')),
     path('vulnerabilities/', include('apps.vulnerabilities.urls')),
     path('sla/', include('apps.sla.urls')),
+    path('api/v1/mis/', include('apps.api.urls')),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
