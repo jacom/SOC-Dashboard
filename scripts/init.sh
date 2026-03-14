@@ -239,6 +239,48 @@ if docker volume inspect "$VOLUME_NAME" &>/dev/null; then
     fi
 fi
 
+# ── ตั้งค่า Firewall ──────────────────────────────────────────────────────────
+_DASH_PORT=$(grep "^DASHBOARD_PORT=" .env 2>/dev/null | cut -d= -f2-)
+_DASH_PORT="${_DASH_PORT:-8500}"
+_FW_PORTS=(22 "${_DASH_PORT}" 9000)   # SSH, Dashboard, TheHive
+
+_setup_firewall() {
+    if command -v ufw &>/dev/null; then
+        # Ubuntu — ufw
+        info "ตั้งค่า ufw firewall..."
+        ufw --force reset >/dev/null
+        ufw default deny incoming >/dev/null
+        ufw default allow outgoing >/dev/null
+        for _p in "${_FW_PORTS[@]}"; do
+            ufw allow "${_p}/tcp" >/dev/null
+            ok "ufw: allow ${_p}/tcp"
+        done
+        ufw --force enable >/dev/null
+        ok "ufw เปิดใช้งานแล้ว"
+
+    elif command -v firewall-cmd &>/dev/null; then
+        # AlmaLinux — firewalld
+        info "ตั้งค่า firewalld..."
+        systemctl enable --now firewalld
+        for _p in "${_FW_PORTS[@]}"; do
+            firewall-cmd --permanent --add-port="${_p}/tcp" >/dev/null
+            ok "firewalld: allow ${_p}/tcp"
+        done
+        firewall-cmd --reload >/dev/null
+        ok "firewalld เปิดใช้งานแล้ว"
+
+    else
+        warn "ไม่พบ ufw หรือ firewalld — ข้ามการตั้งค่า firewall"
+    fi
+}
+
+echo ""
+read -rp "  เปิดใช้งาน Firewall และ allow port ${_DASH_PORT} (Dashboard), 9000 (TheHive), 22 (SSH)? [Y/n]: " _FANS
+_FANS="${_FANS:-y}"
+if [[ "${_FANS,,}" == "y" ]]; then
+    _setup_firewall
+fi
+
 # ── Docker Compose Up ─────────────────────────────────────────────────────────
 info "Starting Docker Compose stack..."
 docker compose up -d
