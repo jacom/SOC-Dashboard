@@ -16,6 +16,14 @@
     .input-group .btn { border-color: #30363d; }
     .bot-status-badge { font-size: 1rem; padding: 0.4em 1em; }
     .group-icon { font-size: 1.2rem; margin-right: 0.4rem; }
+    /* Wazuh Config Check */
+    .check-row { border-left: 4px solid #30363d; padding: 0.5rem 0.8rem; margin-bottom: 0.4rem; border-radius: 4px; background: #161b22; }
+    .check-row.ok   { border-color: #238636; }
+    .check-row.fail { border-color: #da3633; }
+    .snippet { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 0.75rem; font-size: 0.76rem; color: #79c0ff; white-space: pre; overflow-x: auto; }
+    .step-badge { display: inline-block; background: #1f6feb; color: #fff; border-radius: 50%; width: 1.4rem; height: 1.4rem; text-align: center; font-size: 0.72rem; line-height: 1.4rem; font-weight: 700; flex-shrink: 0; }
+    .section-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: #484f58; font-weight: 600; }
+    .copy-btn { cursor: pointer; font-size: 0.72rem; padding: 0.1rem 0.5rem; }
 </style>
 {% endblock %}
 
@@ -167,6 +175,110 @@
                             </div>
                         </div>
                     </div>
+
+                    <!-- ══ Wazuh Configuration Check ══ -->
+                    <hr style="border-color:#21262d; margin: 1.5rem 0;">
+                    <div class="d-flex align-items-center gap-3 mb-3">
+                        <h6 class="mb-0"><i class="bi bi-tools me-2 text-warning"></i>Wazuh Configuration Check</h6>
+                        <button class="btn btn-sm btn-outline-warning" onclick="runProbe()">
+                            <i class="bi bi-play-circle me-1"></i>ตรวจสอบการเชื่อมต่อ
+                        </button>
+                        <span id="probe-spinner" class="spinner-border spinner-border-sm text-info d-none"></span>
+                    </div>
+
+                    <div class="row g-3">
+                        <!-- Live Status -->
+                        <div class="col-lg-5">
+                            <div class="card mb-3">
+                                <div class="card-header"><i class="bi bi-activity me-2 text-info"></i>Live Status</div>
+                                <div class="card-body" id="probe-results">
+                                    <p class="text-muted text-center py-2" style="font-size:0.85rem;">
+                                        <i class="bi bi-arrow-up-circle me-1"></i>กดปุ่ม "ตรวจสอบการเชื่อมต่อ"
+                                    </p>
+                                </div>
+                            </div>
+                            <div class="card">
+                                <div class="card-header"><i class="bi bi-plug me-2"></i>ค่าที่ใช้งานปัจจุบัน</div>
+                                <div class="card-body" style="font-size:0.82rem;">
+                                    <div class="mb-2"><span class="text-muted">Indexer URL:</span><br>
+                                        <code style="color:#79c0ff;">{{ wazuh_indexer_url }}</code></div>
+                                    <div class="mb-2"><span class="text-muted">Vulnerability Index:</span><br>
+                                        <code style="color:#79c0ff;">{{ wazuh_vuln_index }}</code></div>
+                                    <div><span class="text-muted">Dashboard URL:</span><br>
+                                        <code style="color:#79c0ff;">{{ dashboard_url }}</code></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Config Guide -->
+                        <div class="col-lg-7">
+                            <!-- 1. Vulnerability Detector -->
+                            <div class="card mb-3">
+                                <div class="card-header">
+                                    <span class="step-badge me-2">1</span>
+                                    เปิดใช้ <strong>Vulnerability Detector</strong>
+                                    <span class="badge bg-danger ms-2" style="font-size:0.65rem;">จำเป็น</span>
+                                </div>
+                                <div class="card-body">
+                                    <p style="font-size:0.83rem; color:#8b949e;">แก้ไขไฟล์ <code>/var/ossec/etc/ossec.conf</code> บน Wazuh Manager</p>
+                                    <div class="d-flex justify-content-between mb-1">
+                                        <span class="section-label">ossec.conf</span>
+                                        <button class="btn btn-outline-secondary copy-btn" onclick="copySnippet('s1')">⎘ Copy</button>
+                                    </div>
+                                    <div class="snippet" id="s1">&lt;vulnerability-detector&gt;
+  &lt;enabled&gt;yes&lt;/enabled&gt;
+  &lt;interval&gt;5m&lt;/interval&gt;
+  &lt;min_full_scan_interval&gt;6h&lt;/min_full_scan_interval&gt;
+  &lt;run_on_start&gt;yes&lt;/run_on_start&gt;
+  &lt;provider name="nvd"&gt;&lt;enabled&gt;yes&lt;/enabled&gt;&lt;update_interval&gt;1h&lt;/update_interval&gt;&lt;/provider&gt;
+  &lt;provider name="redhat"&gt;&lt;enabled&gt;yes&lt;/enabled&gt;&lt;/provider&gt;
+  &lt;provider name="ubuntu"&gt;&lt;enabled&gt;yes&lt;/enabled&gt;&lt;/provider&gt;
+&lt;/vulnerability-detector&gt;</div>
+                                    <div class="snippet mt-2">sudo systemctl restart wazuh-manager</div>
+                                </div>
+                            </div>
+                            <!-- 2. Syscollector -->
+                            <div class="card mb-3">
+                                <div class="card-header">
+                                    <span class="step-badge me-2">2</span>
+                                    เปิดใช้ <strong>Syscollector</strong> บน Agent
+                                    <span class="badge bg-warning text-dark ms-2" style="font-size:0.65rem;">แนะนำ</span>
+                                </div>
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between mb-1">
+                                        <span class="section-label">ossec.conf บน Agent</span>
+                                        <button class="btn btn-outline-secondary copy-btn" onclick="copySnippet('s2')">⎘ Copy</button>
+                                    </div>
+                                    <div class="snippet" id="s2">&lt;wodle name="syscollector"&gt;
+  &lt;disabled&gt;no&lt;/disabled&gt;
+  &lt;interval&gt;1h&lt;/interval&gt;
+  &lt;scan_on_start&gt;yes&lt;/scan_on_start&gt;
+  &lt;packages&gt;yes&lt;/packages&gt;
+  &lt;os&gt;yes&lt;/os&gt;
+&lt;/wodle&gt;</div>
+                                </div>
+                            </div>
+                            <!-- 3. Custom Integration -->
+                            <div class="card mb-3">
+                                <div class="card-header">
+                                    <span class="step-badge me-2">3</span>
+                                    <strong>Custom Integration</strong> (Real-time webhook)
+                                    <span class="badge bg-secondary ms-2" style="font-size:0.65rem;">optional</span>
+                                </div>
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between mb-1">
+                                        <span class="section-label">ossec.conf บน Manager</span>
+                                        <button class="btn btn-outline-secondary copy-btn" onclick="copySnippet('s3')">⎘ Copy</button>
+                                    </div>
+                                    <div class="snippet" id="s3">&lt;integration&gt;
+  &lt;name&gt;custom-soc-dashboard&lt;/name&gt;
+  &lt;level&gt;3&lt;/level&gt;
+  &lt;alert_format&gt;json&lt;/alert_format&gt;
+&lt;/integration&gt;</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div><!-- /row config check -->
 
                 </div>
 
@@ -1286,5 +1398,51 @@ document.getElementById('restart-bot-btn').addEventListener('click', async funct
         this.disabled = false;
     }
 });
+
+// ── Wazuh Config Check ────────────────────────────────────────────────────────
+function runProbe() {
+    const el   = document.getElementById('probe-results');
+    const spin = document.getElementById('probe-spinner');
+    el.innerHTML = '<p class="text-muted text-center py-2"><span class="spinner-border spinner-border-sm me-2"></span>กำลังตรวจสอบ...</p>';
+    spin.classList.remove('d-none');
+
+    fetch('/settings/wazuh-check/probe/', { method: 'GET' })
+    .then(r => r.json())
+    .then(data => {
+        spin.classList.add('d-none');
+        let html = '';
+        for (const r of data.results) {
+            const cls  = r.ok ? 'ok' : 'fail';
+            const icon = r.ok
+                ? '<i class="bi bi-check-circle-fill text-success"></i>'
+                : '<i class="bi bi-x-circle-fill text-danger"></i>';
+            html += `<div class="check-row ${cls} d-flex align-items-start gap-2">
+                <span class="mt-1">${icon}</span>
+                <div><div style="font-size:0.82rem;font-weight:600;">${r.label}</div>
+                <div style="font-size:0.74rem;color:#8b949e;">${r.detail}</div></div></div>`;
+        }
+        html += `<div class="mt-2 pt-2" style="border-top:1px solid #21262d;font-size:0.78rem;color:${data.ok?'#3fb950':'#ff7b72'};">
+            ${data.ok ? '<i class="bi bi-check-circle me-1"></i>ทุกอย่างพร้อมใช้งาน'
+                      : '<i class="bi bi-exclamation-triangle me-1"></i>พบรายการที่ต้องแก้ไข'}</div>`;
+        el.innerHTML = html;
+    })
+    .catch(e => {
+        spin.classList.add('d-none');
+        el.innerHTML = `<p class="text-danger py-2"><i class="bi bi-x-circle me-1"></i>${e}</p>`;
+    });
+}
+
+function copySnippet(id) {
+    const text = document.getElementById(id).innerText;
+    navigator.clipboard.writeText(text).then(() => {
+        document.querySelectorAll('.copy-btn').forEach(b => {
+            if (b.getAttribute('onclick') && b.getAttribute('onclick').includes(id)) {
+                const orig = b.textContent;
+                b.textContent = '✓ Copied';
+                setTimeout(() => { b.textContent = orig; }, 1500);
+            }
+        });
+    });
+}
 </script>
 {% endblock %}

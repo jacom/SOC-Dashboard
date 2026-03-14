@@ -84,12 +84,18 @@ def settings_view(request):
     ad_severities = _sys_cfg.get('AUTODISMISS_SEVERITIES', 'INFO,LOW')
     ad_sev_list   = [s.strip() for s in ad_severities.split(',') if s.strip()]
 
+    # Wazuh Config Check context (embed in Wazuh tab)
+    _wazuh_idx_url, _, _, _wazuh_vuln_idx = _get_wazuh_indexer_cfg()
+
     return render(request, 'config/settings.html', {
         'grouped': grouped,
         'groups': GROUPS,
         'bot_status': bot_status,
         'moph_img_ordered': moph_img_ordered,
         'soc_bot_env_path': SOC_BOT_ENV_PATH,
+        'wazuh_indexer_url': _wazuh_idx_url,
+        'wazuh_vuln_index':  _wazuh_vuln_idx,
+        'dashboard_url':     _settings.DASHBOARD_URL,
         # Auto-dismiss
         'autodismiss_enabled':     _sys_cfg.get('AUTODISMISS_ENABLED', 'false'),
         'autodismiss_days':        _sys_cfg.get('AUTODISMISS_DAYS', '90'),
