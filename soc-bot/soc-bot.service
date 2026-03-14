@@ -1,15 +1,13 @@
 [Unit]
 Description=SOC Bot (Wazuh Alert Processor)
-After=network.target redis-server.service soc-dashboard.service
-Wants=redis-server.service
+After=network.target
 
 [Service]
 Type=simple
-User=jong2
-Group=jong2
-WorkingDirectory=/home/jong2/soc-bot
-EnvironmentFile=/home/jong2/soc-bot/.env
-ExecStart=/home/jong2/soc-bot/venv/bin/python main.py
+User=__SOC_BOT_USER__
+WorkingDirectory=__SOC_BOT_DIR__
+EnvironmentFile=__SOC_BOT_DIR__/.env
+ExecStart=__SOC_BOT_DIR__/venv/bin/python main.py
 Restart=always
 RestartSec=10
 StartLimitIntervalSec=60

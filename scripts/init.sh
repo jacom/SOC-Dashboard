@@ -280,6 +280,39 @@ echo ""
 echo -e "${CYAN}สร้าง Admin User:${NC}"
 docker compose exec app python manage.py createsuperuser
 
+# ── ติดตั้ง soc-bot service (ถ้ามี) ──────────────────────────────────────────
+SOC_BOT_DIR="${APP_DIR}/soc-bot"
+if [[ -f "${SOC_BOT_DIR}/main.py" ]]; then
+    echo ""
+    info "ตั้งค่า soc-bot service..."
+
+    # สร้าง .env ของ soc-bot ถ้ายังไม่มี
+    if [[ ! -f "${SOC_BOT_DIR}/.env" ]]; then
+        cp "${SOC_BOT_DIR}/.env.example" "${SOC_BOT_DIR}/.env"
+        ok "สร้าง soc-bot/.env จาก .env.example — กรุณาแก้ค่าก่อนใช้งาน"
+    else
+        warn "soc-bot/.env มีอยู่แล้ว — ข้ามการสร้างใหม่"
+    fi
+
+    # install venv ถ้ายังไม่มี
+    if [[ ! -d "${SOC_BOT_DIR}/venv" ]]; then
+        info "สร้าง soc-bot venv..."
+        python3 -m venv "${SOC_BOT_DIR}/venv"
+        "${SOC_BOT_DIR}/venv/bin/pip" install -q -r "${SOC_BOT_DIR}/requirements.txt"
+        ok "soc-bot venv พร้อมแล้ว"
+    fi
+
+    # install systemd service พร้อม path จริง
+    BOT_USER=$(whoami)
+    sed -e "s|__SOC_BOT_USER__|${BOT_USER}|g" \
+        -e "s|__SOC_BOT_DIR__|${SOC_BOT_DIR}|g" \
+        "${SOC_BOT_DIR}/soc-bot.service" > /etc/systemd/system/soc-bot.service
+    systemctl daemon-reload
+    systemctl enable soc-bot 2>/dev/null || true
+    ok "soc-bot.service ติดตั้งแล้ว (ยังไม่ start — แก้ .env ก่อน)"
+    warn "กรุณาแก้ ${SOC_BOT_DIR}/.env แล้วรัน: sudo systemctl start soc-bot"
+fi
+
 # ── Done ──────────────────────────────────────────────────────────────────────
 DASH_PORT=$(grep "DASHBOARD_PORT" .env | cut -d= -f2)
 SERVER_IP=$(grep "ALLOWED_HOSTS" .env | cut -d= -f2 | tr ',' '\n' | grep -v localhost | grep -v "127.0.0.1" | head -1)
