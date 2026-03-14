@@ -1,0 +1,64 @@
+version: "3.9"
+
+# =============================================================================
+# TheHive 5 + Cassandra
+# วิธีใช้แบบ standalone:
+#   docker compose -f docker-compose.thehive.yml up -d
+# หรือรันผ่าน scripts/init.sh (จะถามให้ติดตั้งอัตโนมัติ)
+# =============================================================================
+
+services:
+
+  # ── Cassandra (TheHive database) ───────────────────────────────────────────
+  cassandra:
+    image: cassandra:4.1
+    restart: unless-stopped
+    environment:
+      CASSANDRA_CLUSTER_NAME: thehive
+      MAX_HEAP_SIZE: 1G
+      HEAP_NEWSIZE: 256M
+    volumes:
+      - thehive_cassandra:/var/lib/cassandra
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh -e 'describe keyspaces' 2>/dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+
+  # ── TheHive 5 ───────────────────────────────────────────────────────────────
+  thehive:
+    image: strangebee/thehive:5.3
+    restart: unless-stopped
+    depends_on:
+      cassandra:
+        condition: service_healthy
+    ports:
+      - "9000:9000"
+    environment:
+      JVM_OPTS: "-Xms512m -Xmx1g"
+    volumes:
+      - thehive_data:/opt/thp/thehive/data
+      - thehive_logs:/var/log/thehive
+    command:
+      - --secret
+      - "${THEHIVE_SECRET:-changeme-replace-with-random-secret}"
+      - --cql-hostnames
+      - "cassandra"
+      - --cql-username
+      - "cassandra"
+      - --cql-password
+      - "cassandra"
+      - --index-backend
+      - "main"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:9000/api/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+
+volumes:
+  thehive_cassandra:
+  thehive_data:
+  thehive_logs:

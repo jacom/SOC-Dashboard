@@ -376,6 +376,49 @@ if [[ -f "${SOC_BOT_DIR}/main.py" ]]; then
     warn "กรุณาแก้ ${SOC_BOT_DIR}/.env แล้วรัน: sudo systemctl start soc-bot"
 fi
 
+# ── ติดตั้ง TheHive (optional) ────────────────────────────────────────────────
+echo ""
+read -rp "  ต้องการติดตั้ง TheHive 5 (Case Management)? [y/N]: " _THANS
+_THANS="${_THANS:-n}"
+if [[ "${_THANS,,}" == "y" ]]; then
+    THEHIVE_COMPOSE="${APP_DIR}/docker-compose.thehive.yml"
+
+    if [[ ! -f "$THEHIVE_COMPOSE" ]]; then
+        err "ไม่พบ docker-compose.thehive.yml — กรุณา git pull ล่าสุด"
+    fi
+
+    # Generate secret ถ้ายังไม่มีใน .env
+    if ! grep -q "^THEHIVE_SECRET=" .env 2>/dev/null; then
+        _TH_SECRET=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+        echo "THEHIVE_SECRET=${_TH_SECRET}" >> .env
+        ok "สร้าง THEHIVE_SECRET แล้ว"
+    else
+        warn "THEHIVE_SECRET มีอยู่แล้วใน .env — ใช้ค่าเดิม"
+    fi
+
+    info "Starting TheHive + Cassandra..."
+    docker compose -f "$THEHIVE_COMPOSE" --env-file .env up -d
+    ok "TheHive containers started"
+
+    info "รอให้ TheHive พร้อม (อาจใช้เวลา 2-3 นาที)..."
+    _TH_READY=false
+    for _i in $(seq 1 36); do
+        if curl -sf "http://localhost:9000/api/status" &>/dev/null; then
+            _TH_READY=true
+            break
+        fi
+        sleep 5
+    done
+
+    if [[ "$_TH_READY" == "true" ]]; then
+        ok "TheHive พร้อมใช้งานที่ http://localhost:9000"
+        ok "Default login: admin@thehive.local / secret"
+    else
+        warn "TheHive ยังไม่พร้อม — รอ Cassandra initialize (ปกติใช้เวลา 3-5 นาทีครั้งแรก)"
+        warn "ตรวจสอบ: docker compose -f docker-compose.thehive.yml logs -f thehive"
+    fi
+fi
+
 # ── Done ──────────────────────────────────────────────────────────────────────
 DASH_PORT=$(grep "DASHBOARD_PORT" .env | cut -d= -f2)
 SERVER_IP=$(grep "ALLOWED_HOSTS" .env | cut -d= -f2 | tr ',' '\n' | grep -v localhost | grep -v "127.0.0.1" | head -1)
@@ -391,8 +434,11 @@ echo -e "  ขั้นตอนถัดไป:"
 echo -e "  1. เข้า ${CYAN}http://${SERVER_IP}:${DASH_PORT}/settings/${NC}"
 echo -e "     → ตั้งค่า Wazuh Indexer URL และ Password"
 echo -e "     → ตั้งค่า LINE, SMTP, TheHive และ integration อื่นๆ"
-echo -e "  2. เข้า ${CYAN}http://${SERVER_IP}:${DASH_PORT}/settings/wazuh-check/${NC}"
-echo -e "     → ตรวจสอบการเชื่อมต่อ Wazuh"
-echo -e "  3. เข้า ${CYAN}http://${SERVER_IP}:${DASH_PORT}/license/${NC}"
+echo -e "  2. เข้า ${CYAN}http://${SERVER_IP}:${DASH_PORT}/license/${NC}"
 echo -e "     → ใส่ License Key"
+if [[ "${_THANS,,}" == "y" ]]; then
+echo -e "  3. TheHive: ${CYAN}http://${SERVER_IP}:9000${NC}"
+echo -e "     → Default login: admin@thehive.local / secret"
+echo -e "     → สร้าง API Key แล้วใส่ใน Settings → TheHive"
+fi
 echo ""
