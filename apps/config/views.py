@@ -89,6 +89,7 @@ def settings_view(request):
         'groups': GROUPS,
         'bot_status': bot_status,
         'moph_img_ordered': moph_img_ordered,
+        'soc_bot_env_path': SOC_BOT_ENV_PATH,
         # Auto-dismiss
         'autodismiss_enabled':     _sys_cfg.get('AUTODISMISS_ENABLED', 'false'),
         'autodismiss_days':        _sys_cfg.get('AUTODISMISS_DAYS', '90'),
@@ -691,22 +692,23 @@ def toggle_ai_service(request, service):
 @login_required
 @require_POST
 def restart_bot(request):
-    try:
-        result = subprocess.run(
-            ['sudo', 'systemctl', 'restart', 'soc-bot'],
-            capture_output=True, text=True, timeout=15
-        )
-        if result.returncode == 0:
-            return JsonResponse({'ok': True, 'message': 'soc-bot restarted successfully'})
-        else:
-            return JsonResponse({
-                'ok': False,
-                'message': result.stderr.strip() or 'Restart failed (non-zero exit)'
-            })
-    except subprocess.TimeoutExpired:
-        return JsonResponse({'ok': False, 'message': 'Restart timed out'})
-    except Exception as e:
-        return JsonResponse({'ok': False, 'message': str(e)})
+    # ลอง systemctl ก่อน (non-Docker) แล้ว fallback แจ้งให้ restart เอง
+    for cmd in [
+        ['systemctl', 'restart', 'soc-bot'],
+        ['sudo', 'systemctl', 'restart', 'soc-bot'],
+    ]:
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+            if result.returncode == 0:
+                return JsonResponse({'ok': True, 'message': 'soc-bot restarted'})
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            continue
+        except Exception:
+            continue
+    return JsonResponse({
+        'ok': False,
+        'message': 'ไม่สามารถ restart อัตโนมัติได้ — รัน: sudo systemctl restart soc-bot'
+    })
 
 
 # ── Wazuh Config Check ─────────────────────────────────────────────────────────
