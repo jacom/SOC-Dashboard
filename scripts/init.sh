@@ -257,17 +257,20 @@ info "Running migrations..."
 docker compose exec app python manage.py migrate --noinput
 ok "Migration เสร็จสิ้น"
 
-# ── Seed Wazuh Indexer URL จาก .env ──────────────────────────────────────────
-# migration ตั้งค่าเริ่มต้นเป็น '' — อัปเดตจาก .env เพื่อให้ Wazuh Config Check
-# แสดงค่าที่ถูกต้อง (user ยังแก้ได้ภายหลังที่ /settings/)
+# ── Seed Wazuh Indexer URL จาก .env (เฉพาะครั้งแรก ถ้า DB ยังว่าง) ──────────
 _ENV_WAZUH_URL=$(grep "^WAZUH_INDEXER_URL=" .env | cut -d= -f2-)
 _ENV_WAZUH_USER=$(grep "^WAZUH_INDEXER_USERNAME=" .env | cut -d= -f2-)
 if [[ -n "$_ENV_WAZUH_URL" ]]; then
 docker compose exec -T app python manage.py shell -c "
 from apps.config.models import IntegrationConfig
-IntegrationConfig.objects.filter(key='WAZUH_INDEXER_URL').update(value='${_ENV_WAZUH_URL}')
-IntegrationConfig.objects.filter(key='WAZUH_INDEXER_USER').update(value='${_ENV_WAZUH_USER:-admin}')
-" 2>/dev/null && info "Wazuh Indexer URL seeded → ${_ENV_WAZUH_URL}"
+obj = IntegrationConfig.objects.filter(key='WAZUH_INDEXER_URL').first()
+if not obj or not obj.value:
+    IntegrationConfig.objects.filter(key='WAZUH_INDEXER_URL').update(value='${_ENV_WAZUH_URL}')
+    IntegrationConfig.objects.filter(key='WAZUH_INDEXER_USER').update(value='${_ENV_WAZUH_USER:-admin}')
+    print('seeded')
+else:
+    print('skip')
+" 2>/dev/null | grep -q "seeded" && info "Wazuh Indexer URL seeded → ${_ENV_WAZUH_URL}" || true
 fi
 
 # ── Collectstatic ─────────────────────────────────────────────────────────────
@@ -275,10 +278,17 @@ info "Collecting static files..."
 docker compose exec app python manage.py collectstatic --noinput
 ok "Static files เสร็จสิ้น"
 
-# ── สร้าง superuser ───────────────────────────────────────────────────────────
-echo ""
-echo -e "${CYAN}สร้าง Admin User:${NC}"
-docker compose exec app python manage.py createsuperuser
+# ── สร้าง superuser (เฉพาะครั้งแรก) ─────────────────────────────────────────
+_SU_EXISTS=$(docker compose exec -T app python manage.py shell -c \
+    "from django.contrib.auth import get_user_model; print(get_user_model().objects.filter(is_superuser=True).exists())" \
+    2>/dev/null | tr -d '[:space:]')
+if [[ "$_SU_EXISTS" == "True" ]]; then
+    warn "มี superuser อยู่แล้ว — ข้ามการสร้างใหม่"
+else
+    echo ""
+    echo -e "${CYAN}สร้าง Admin User:${NC}"
+    docker compose exec app python manage.py createsuperuser
+fi
 
 # ── ติดตั้ง soc-bot service (ถ้ามี) ──────────────────────────────────────────
 SOC_BOT_DIR="${APP_DIR}/soc-bot"
