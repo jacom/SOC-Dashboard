@@ -176,42 +176,18 @@
                         </div>
                     </div>
 
-                    <!-- ══ Wazuh Configuration Check ══ -->
+                    <!-- ══ Save + Configuration Guide ══ -->
                     <hr style="border-color:#21262d; margin: 1.5rem 0;">
-                    <div class="d-flex align-items-center gap-3 mb-3">
-                        <h6 class="mb-0"><i class="bi bi-tools me-2 text-warning"></i>Wazuh Configuration Check</h6>
-                        <button type="button" class="btn btn-sm btn-outline-warning" onclick="runProbe()">
-                            <i class="bi bi-play-circle me-1"></i>ตรวจสอบการเชื่อมต่อ
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h6 class="mb-0"><i class="bi bi-book me-2 text-info"></i>Configuration Guide</h6>
+                        <button type="submit" class="btn btn-primary px-4">
+                            <i class="bi bi-floppy me-2"></i>Save All Settings
                         </button>
-                        <span id="probe-spinner" class="spinner-border spinner-border-sm text-info d-none"></span>
                     </div>
 
                     <div class="row g-3">
-                        <!-- Live Status -->
-                        <div class="col-lg-5">
-                            <div class="card mb-3">
-                                <div class="card-header"><i class="bi bi-activity me-2 text-info"></i>Live Status</div>
-                                <div class="card-body" id="probe-results">
-                                    <p class="text-muted text-center py-2" style="font-size:0.85rem;">
-                                        <i class="bi bi-arrow-up-circle me-1"></i>กดปุ่ม "ตรวจสอบการเชื่อมต่อ"
-                                    </p>
-                                </div>
-                            </div>
-                            <div class="card">
-                                <div class="card-header"><i class="bi bi-plug me-2"></i>ค่าที่ใช้งานปัจจุบัน</div>
-                                <div class="card-body" style="font-size:0.82rem;">
-                                    <div class="mb-2"><span class="text-muted">Indexer URL:</span><br>
-                                        <code style="color:#79c0ff;">{{ wazuh_indexer_url }}</code></div>
-                                    <div class="mb-2"><span class="text-muted">Vulnerability Index:</span><br>
-                                        <code style="color:#79c0ff;">{{ wazuh_vuln_index }}</code></div>
-                                    <div><span class="text-muted">Dashboard URL:</span><br>
-                                        <code style="color:#79c0ff;">{{ dashboard_url }}</code></div>
-                                </div>
-                            </div>
-                        </div>
-
                         <!-- Config Guide -->
-                        <div class="col-lg-7">
+                        <div class="col-12">
                             <!-- 1. Vulnerability Detector -->
                             <div class="card mb-3">
                                 <div class="card-header">
@@ -919,6 +895,39 @@
                     <p>Changes are saved to the database and written to:<br>
                     <code style="font-size:0.78rem;">{{ soc_bot_env_path }}</code></p>
                     <p class="mb-0">The bot must be restarted to pick up new credentials.</p>
+                </div>
+            </div>
+
+            <!-- Wazuh Connection Check -->
+            <div class="card mt-3">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-tools me-2 text-warning"></i>Wazuh Check</span>
+                    <div class="d-flex align-items-center gap-2">
+                        <span id="probe-spinner" class="spinner-border spinner-border-sm text-info d-none"></span>
+                        <button type="button" class="btn btn-sm btn-outline-warning" onclick="runProbe()">
+                            <i class="bi bi-play-circle me-1"></i>ตรวจสอบ
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body p-0">
+                    <div id="probe-results" style="font-size:0.82rem; padding:0.75rem;">
+                        <p class="text-muted text-center mb-0" style="font-size:0.82rem;">
+                            <i class="bi bi-arrow-up-circle me-1"></i>กดปุ่มตรวจสอบ
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Current Wazuh Config -->
+            <div class="card mt-3">
+                <div class="card-header"><i class="bi bi-plug me-2"></i>ค่าที่ใช้งานปัจจุบัน</div>
+                <div class="card-body" style="font-size:0.80rem;">
+                    <div class="mb-2"><span class="text-muted">Indexer URL:</span><br>
+                        <code style="color:#79c0ff; word-break:break-all;">{{ wazuh_indexer_url }}</code></div>
+                    <div class="mb-2"><span class="text-muted">Vulnerability Index:</span><br>
+                        <code style="color:#79c0ff; word-break:break-all;">{{ wazuh_vuln_index }}</code></div>
+                    <div><span class="text-muted">Dashboard URL:</span><br>
+                        <code style="color:#79c0ff; word-break:break-all;">{{ dashboard_url }}</code></div>
                 </div>
             </div>
         </div>
