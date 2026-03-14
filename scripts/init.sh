@@ -332,6 +332,34 @@ else
     docker compose exec app python manage.py createsuperuser
 fi
 
+# ── ติดตั้ง Ollama (optional) ─────────────────────────────────────────────────
+echo ""
+read -rp "  ต้องการติดตั้ง Ollama (Local LLM สำหรับ AI Analysis)? [y/N]: " _OLANS
+_OLANS="${_OLANS:-n}"
+if [[ "${_OLANS,,}" == "y" ]]; then
+    if command -v ollama &>/dev/null; then
+        warn "Ollama ติดตั้งอยู่แล้ว ($(ollama --version 2>/dev/null || echo 'OK'))"
+    else
+        info "ติดตั้ง Ollama..."
+        curl -fsSL https://ollama.com/install.sh | sh
+        ok "Ollama ติดตั้งเสร็จสิ้น"
+    fi
+
+    # เปิด service
+    systemctl enable --now ollama 2>/dev/null || true
+
+    # ถามว่าจะ pull model ไหน
+    echo ""
+    read -rp "  Pull Ollama model (default: qwen2.5:7b, กด Enter เพื่อข้าม): " _OL_MODEL
+    _OL_MODEL="${_OL_MODEL:-}"
+    if [[ -n "$_OL_MODEL" ]]; then
+        info "กำลัง pull ${_OL_MODEL} (อาจใช้เวลานาน)..."
+        ollama pull "$_OL_MODEL" && ok "Pull ${_OL_MODEL} สำเร็จ"
+    else
+        warn "ข้าม — pull model ได้ภายหลัง: ollama pull qwen2.5:7b"
+    fi
+fi
+
 # ── ติดตั้ง soc-bot service (ถ้ามี) ──────────────────────────────────────────
 SOC_BOT_DIR="${APP_DIR}/soc-bot"
 if [[ -f "${SOC_BOT_DIR}/main.py" ]]; then
@@ -440,5 +468,10 @@ if [[ "${_THANS,,}" == "y" ]]; then
 echo -e "  3. TheHive: ${CYAN}http://${SERVER_IP}:9000${NC}"
 echo -e "     → Default login: admin@thehive.local / secret"
 echo -e "     → สร้าง API Key แล้วใส่ใน Settings → TheHive"
+fi
+if [[ "${_OLANS,,}" == "y" ]]; then
+echo -e "  4. Ollama: ${CYAN}http://localhost:11434${NC}"
+echo -e "     → pull model: ollama pull qwen2.5:7b"
+echo -e "     → ตั้งค่า model ใน Settings → Ollama"
 fi
 echo ""
