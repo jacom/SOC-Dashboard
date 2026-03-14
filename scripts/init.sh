@@ -23,6 +23,52 @@ echo -e "${BLUE}  SOC Dashboard — Setup${NC}"
 echo -e "${BLUE}════════════════════════════════════════════${NC}"
 echo ""
 
+# ── ตรวจสอบ root ──────────────────────────────────────────────────────────────
+if [[ "$EUID" -ne 0 ]]; then
+    err "กรุณารันด้วย sudo: sudo bash scripts/init.sh"
+fi
+
+# ── ตรวจสอบ OS (ก่อนติดตั้ง base packages) ───────────────────────────────────
+_detect_os() {
+    if [[ -f /etc/os-release ]]; then
+        . /etc/os-release
+        case "${ID,,}" in
+            ubuntu|debian)               OS_TYPE="ubuntu" ;;
+            almalinux|rhel|centos|rocky) OS_TYPE="almalinux" ;;
+            *)                           OS_TYPE="unknown" ;;
+        esac
+        OS_NAME="${PRETTY_NAME:-$ID}"
+    else
+        OS_TYPE="unknown"
+        OS_NAME="Unknown OS"
+    fi
+}
+_detect_os
+info "ตรวจพบ OS: ${OS_NAME}"
+
+# ── ติดตั้ง base packages (git, curl, python3) ────────────────────────────────
+_install_base_packages() {
+    info "ติดตั้ง base packages (git, curl, python3)..."
+    if [[ "$OS_TYPE" == "ubuntu" ]]; then
+        apt-get update -qq
+        apt-get install -y git curl python3 python3-pip ca-certificates gnupg
+    elif [[ "$OS_TYPE" == "almalinux" ]]; then
+        dnf install -y git curl python3 python3-pip ca-certificates
+    else
+        warn "ไม่สามารถติดตั้ง base packages อัตโนมัติ — ตรวจสอบว่ามี git, curl, python3"
+    fi
+}
+
+_MISSING_BASE=false
+for _pkg in git curl python3; do
+    command -v "$_pkg" &>/dev/null || _MISSING_BASE=true
+done
+if [[ "$_MISSING_BASE" == "true" ]]; then
+    _install_base_packages
+fi
+ok "git $(git --version | awk '{print $3}')"
+ok "python3 $(python3 --version | awk '{print $2}')"
+
 # ── ดึง code ล่าสุดจาก GitHub ────────────────────────────────────────────────
 if git rev-parse --is-inside-work-tree &>/dev/null; then
     info "ดึง code ล่าสุดจาก GitHub..."
@@ -92,25 +138,6 @@ EOF
     ok ".env สร้างเรียบร้อย"
 fi
 
-# ── ตรวจสอบ OS ────────────────────────────────────────────────────────────────
-_detect_os() {
-    if [[ -f /etc/os-release ]]; then
-        . /etc/os-release
-        case "${ID,,}" in
-            ubuntu|debian)           OS_TYPE="ubuntu" ;;
-            almalinux|rhel|centos|rocky) OS_TYPE="almalinux" ;;
-            *)                       OS_TYPE="unknown" ;;
-        esac
-        OS_NAME="${PRETTY_NAME:-$ID}"
-    else
-        OS_TYPE="unknown"
-        OS_NAME="Unknown OS"
-    fi
-}
-
-_detect_os
-info "ตรวจพบ OS: ${OS_NAME}"
-
 if [[ "$OS_TYPE" == "unknown" ]]; then
     warn "OS ไม่รองรับการติดตั้งอัตโนมัติ (รองรับ: Ubuntu, AlmaLinux/RHEL)"
 fi
@@ -118,15 +145,6 @@ fi
 # ── ตรวจสอบและติดตั้ง Docker ─────────────────────────────────────────────────
 _install_docker() {
     info "ติดตั้ง Docker..."
-    if ! command -v curl &>/dev/null; then
-        if [[ "$OS_TYPE" == "ubuntu" ]]; then
-            apt-get update -qq && apt-get install -y curl
-        elif [[ "$OS_TYPE" == "almalinux" ]]; then
-            dnf install -y curl
-        else
-            err "ไม่พบ curl — กรุณาติดตั้งก่อน"
-        fi
-    fi
 
     if [[ "$OS_TYPE" == "ubuntu" ]]; then
         # Ubuntu: ติดตั้งผ่าน official Docker apt repo
