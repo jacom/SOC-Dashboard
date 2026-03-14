@@ -304,6 +304,17 @@ if [[ -f "${SOC_BOT_DIR}/main.py" ]]; then
         warn "soc-bot/.env มีอยู่แล้ว — ข้ามการสร้างใหม่"
     fi
 
+    # ติดตั้ง python3-venv ถ้าจำเป็น
+    if ! python3 -c "import ensurepip" &>/dev/null; then
+        info "ติดตั้ง python3-venv..."
+        if [[ "$OS_TYPE" == "ubuntu" ]]; then
+            PY_VER=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+            apt-get install -y "python${PY_VER}-venv" 2>/dev/null || apt-get install -y python3-venv
+        elif [[ "$OS_TYPE" == "almalinux" ]]; then
+            dnf install -y python3-virtualenv 2>/dev/null || true
+        fi
+    fi
+
     # install venv ถ้ายังไม่มี
     if [[ ! -d "${SOC_BOT_DIR}/venv" ]]; then
         info "สร้าง soc-bot venv..."
