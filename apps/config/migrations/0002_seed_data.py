@@ -6,10 +6,10 @@ INITIAL_CONFIGS = [
     {'key': 'WAZUH_USER',     'label': 'Username',        'group': 'wazuh',  'is_secret': False, 'description': 'Wazuh API username', 'value': 'wazuh'},
     {'key': 'WAZUH_PASSWORD', 'label': 'Password',        'group': 'wazuh',  'is_secret': True,  'description': 'Wazuh API password', 'value': 'change-this-to-wazuh-password'},
     # Ollama
-    {'key': 'OLLAMA_URL',     'label': 'Ollama URL',      'group': 'ollama', 'is_secret': False, 'description': 'e.g. http://localhost:11434', 'value': 'http://localhost:11434'},
+    {'key': 'OLLAMA_URL',     'label': 'Ollama URL',      'group': 'ollama', 'is_secret': False, 'description': 'e.g. http://host.docker.internal:11434', 'value': 'http://host.docker.internal:11434'},
     {'key': 'OLLAMA_MODEL',   'label': 'Model Name',      'group': 'ollama', 'is_secret': False, 'description': 'e.g. openchat or llama3.2', 'value': 'openchat'},
     # TheHive
-    {'key': 'THEHIVE_URL',    'label': 'TheHive URL',     'group': 'thehive','is_secret': False, 'description': 'e.g. http://thehive:9000', 'value': 'http://localhost:9000'},
+    {'key': 'THEHIVE_URL',    'label': 'TheHive URL',     'group': 'thehive','is_secret': False, 'description': 'e.g. http://host.docker.internal:9000', 'value': 'http://host.docker.internal:9000'},
     {'key': 'THEHIVE_API_KEY','label': 'API Key',         'group': 'thehive','is_secret': True,  'description': 'TheHive API key', 'value': 'change-this-to-thehive-api-key'},
     # LINE
     {'key': 'LINE_NOTIFY_TOKEN', 'label': 'LINE Notify Token', 'group': 'line', 'is_secret': True, 'description': 'From notify.line.me/my — leave empty to disable', 'value': 'change-this-to-line-notify-token'},

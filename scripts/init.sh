@@ -333,6 +333,25 @@ else:
 " 2>/dev/null | grep -q "seeded" && info "Wazuh Indexer URL seeded → ${_ENV_WAZUH_URL}" || true
 fi
 
+# ── Seed Ollama + TheHive URL สำหรับ Docker context ──────────────────────────
+# localhost ใน container = container itself ไม่ใช่ host → ต้องใช้ host.docker.internal
+info "ปรับ Ollama/TheHive URL ให้ใช้ host.docker.internal..."
+docker compose exec -T app python manage.py shell -c "
+from apps.config.models import IntegrationConfig
+changes = {
+    'OLLAMA_URL':  'http://host.docker.internal:11434',
+    'THEHIVE_URL': 'http://host.docker.internal:9000',
+}
+for key, new_val in changes.items():
+    obj = IntegrationConfig.objects.filter(key=key).first()
+    if obj and ('localhost' in obj.value or '127.0.0.1' in obj.value):
+        obj.value = new_val
+        obj.save()
+        print(f'updated {key} -> {new_val}')
+    else:
+        print(f'skip {key} (already customized or not found)')
+" 2>/dev/null || true
+
 # ── Collectstatic ─────────────────────────────────────────────────────────────
 info "Collecting static files..."
 docker compose exec app python manage.py collectstatic --noinput

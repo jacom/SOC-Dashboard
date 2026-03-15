@@ -46,6 +46,8 @@ services:
     build: .
     restart: unless-stopped
     env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # reach Ollama/soc-bot on host
     environment:
       DATABASE_URL: postgresql://${DB_USER:-soc_user}:${DB_PASSWORD}@db:5432/${DB_NAME:-soc_db}
       REDIS_URL: redis://redis:6379/1
