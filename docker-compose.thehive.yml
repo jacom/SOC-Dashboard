@@ -1,5 +1,3 @@
-version: "3.9"
-
 # =============================================================================
 # TheHive 5 + Cassandra
 # วิธีใช้แบบ standalone:
@@ -39,6 +37,7 @@ services:
       JVM_OPTS: "-Xms512m -Xmx1g"
     volumes:
       - thehive_data:/opt/thp/thehive/data
+      - thehive_index:/opt/thp/thehive/index
       - thehive_logs:/var/log/thehive
     command:
       - --secret
@@ -50,7 +49,9 @@ services:
       - --cql-password
       - "cassandra"
       - --index-backend
-      - "main"
+      - "lucene"
+      - --lucene-directory
+      - "/opt/thp/thehive/index"
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:9000/api/status"]
       interval: 30s
@@ -61,4 +62,5 @@ services:
 volumes:
   thehive_cassandra:
   thehive_data:
+  thehive_index:
   thehive_logs:
