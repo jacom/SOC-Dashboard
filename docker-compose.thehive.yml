@@ -37,7 +37,6 @@ services:
       JVM_OPTS: "-Xms512m -Xmx1g"
     volumes:
       - thehive_data:/opt/thp/thehive/data
-      - thehive_index:/opt/thp/thehive/index
       - thehive_logs:/var/log/thehive
     command:
       - --secret
@@ -50,8 +49,6 @@ services:
       - "cassandra"
       - --index-backend
       - "lucene"
-      - --lucene-directory
-      - "/opt/thp/thehive/index"
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:9000/api/status"]
       interval: 30s
@@ -62,5 +59,4 @@ services:
 volumes:
   thehive_cassandra:
   thehive_data:
-  thehive_index:
   thehive_logs:
