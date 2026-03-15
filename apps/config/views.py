@@ -166,22 +166,39 @@ def _write_env_file():
 
 
 def _get_bot_status():
+    # Try systemctl first
+    for cmd in (
+        ['/usr/bin/systemctl', 'is-active', 'soc-bot'],
+        ['/bin/systemctl',     'is-active', 'soc-bot'],
+    ):
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            status = result.stdout.strip()
+            if status == 'active':
+                return {'status': 'active',   'label': 'Running', 'badge': 'success'}
+            if status == 'inactive':
+                return {'status': 'inactive', 'label': 'Stopped', 'badge': 'secondary'}
+            if status == 'failed':
+                return {'status': 'failed',   'label': 'Failed',  'badge': 'danger'}
+            if status:
+                return {'status': status, 'label': status.title(), 'badge': 'warning'}
+        except Exception:
+            continue
+
+    # Fallback: check cgroup PID file from systemd
     try:
-        result = subprocess.run(
-            ['systemctl', 'is-active', 'soc-bot'],
-            capture_output=True, text=True, timeout=5
-        )
-        status = result.stdout.strip()
-        if status == 'active':
-            return {'status': 'active', 'label': 'Running', 'badge': 'success'}
-        elif status == 'inactive':
-            return {'status': 'inactive', 'label': 'Stopped', 'badge': 'secondary'}
-        elif status == 'failed':
-            return {'status': 'failed', 'label': 'Failed', 'badge': 'danger'}
-        else:
-            return {'status': status, 'label': status.title(), 'badge': 'warning'}
-    except Exception as e:
-        return {'status': 'unknown', 'label': 'Unknown', 'badge': 'secondary'}
+        import pathlib
+        cgroup = pathlib.Path('/sys/fs/cgroup/system.slice/soc-bot.service/cgroup.procs')
+        if not cgroup.exists():
+            cgroup = pathlib.Path('/sys/fs/cgroup/systemd/system.slice/soc-bot.service/tasks')
+        if cgroup.exists():
+            pids = cgroup.read_text().strip().split()
+            if pids:
+                return {'status': 'active', 'label': 'Running', 'badge': 'success'}
+    except Exception:
+        pass
+
+    return {'status': 'unknown', 'label': 'Unknown', 'badge': 'secondary'}
 
 
 @login_required
