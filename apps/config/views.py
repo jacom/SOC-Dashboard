@@ -868,15 +868,28 @@ def wazuh_probe(request):
                         'ok': False, 'detail': str(e)})
 
     # 5. Syscollector (for asset port data)
-    data, err = _get('/wazuh-alerts-4.x-*/_count?q=decoder.name:syscollector', 'syscollector')
-    if data is not None:
-        count = data.get('count', 0)
-        results.append({'id': 'syscollector', 'label': 'Syscollector module (port/process data)',
-                        'ok': count > 0,
-                        'detail': f'{count:,} events' if count > 0 else 'ไม่พบ syscollector events'})
-    else:
+    _sc_body = json.dumps({
+        "size": 0,
+        "query": {"match": {"decoder.name": "syscollector"}}
+    }).encode()
+    _sc_req = urllib.request.Request(
+        f'{idx_url}/wazuh-alerts-4.x-*/_count',
+        data=_sc_body,
+        headers={
+            'Authorization': 'Basic ' + base64.b64encode(f'{idx_user}:{idx_pass}'.encode()).decode(),
+            'Content-Type': 'application/json',
+        },
+    )
+    try:
+        with urllib.request.urlopen(_sc_req, context=ctx, timeout=8) as r:
+            _sc_data = json.loads(r.read())
+            count = _sc_data.get('count', 0)
+            results.append({'id': 'syscollector', 'label': 'Syscollector module (port/process data)',
+                            'ok': count > 0,
+                            'detail': f'{count:,} events' if count > 0 else 'ไม่พบ syscollector events — ตรวจสอบ agent config'})
+    except Exception as e:
         results.append({'id': 'syscollector', 'label': 'Syscollector module',
-                        'ok': False, 'detail': err or 'ไม่พบข้อมูล'})
+                        'ok': False, 'detail': str(e)})
 
     all_ok = all(r['ok'] for r in results)
     return JsonResponse({'ok': all_ok, 'results': results})
