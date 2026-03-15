@@ -959,7 +959,6 @@ def wazuh_probe(request):
 
     # 5. Syscollector (for asset port data)
     _sc_body = json.dumps({
-        "size": 0,
         "query": {"match": {"decoder.name": "syscollector"}}
     }).encode()
     _sc_req = urllib.request.Request(
