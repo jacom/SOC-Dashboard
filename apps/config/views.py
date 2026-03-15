@@ -174,7 +174,7 @@ def _get_bot_status():
         # soc-bot uses db index 2; strip trailing db and use /2
         _redis_base = _redis_url.rsplit('/', 1)[0]
         _r = _redis.from_url(
-            f'{_redis_base}/2',  # soc-bot uses db 2
+            f'{_redis_base}/0',  # soc-bot uses db 0 (matches .env.example REDIS_URL)
             socket_connect_timeout=3,
             socket_timeout=3,
         )

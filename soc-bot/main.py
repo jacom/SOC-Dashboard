@@ -35,7 +35,7 @@ logging.basicConfig(
 logger = logging.getLogger('soc-bot')
 
 POLL_INTERVAL = int(os.environ.get('POLL_INTERVAL', '30'))
-REDIS_URL = os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379/2')
+REDIS_URL = os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379/0')
 
 # Redis keys for state tracking
 LAST_POLL_KEY = 'soc:last_poll_time'
