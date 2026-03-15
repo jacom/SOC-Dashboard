@@ -365,17 +365,7 @@ if [[ "${_OLANS,,}" == "y" ]]; then
 
     # เปิด service
     systemctl enable --now ollama 2>/dev/null || true
-
-    # ถามว่าจะ pull model ไหน
-    echo ""
-    read -rp "  Pull Ollama model (default: qwen2.5:7b, กด Enter เพื่อข้าม): " _OL_MODEL
-    _OL_MODEL="${_OL_MODEL:-}"
-    if [[ -n "$_OL_MODEL" ]]; then
-        info "กำลัง pull ${_OL_MODEL} (อาจใช้เวลานาน)..."
-        ollama pull "$_OL_MODEL" && ok "Pull ${_OL_MODEL} สำเร็จ"
-    else
-        warn "ข้าม — pull model ได้ภายหลัง: ollama pull qwen2.5:7b"
-    fi
+    warn "pull model ได้ใน Settings → Ollama → Pull Model หรือรัน: ollama pull qwen2.5:7b"
 fi
 
 # ── ติดตั้ง soc-bot service (ถ้ามี) ──────────────────────────────────────────

@@ -330,6 +330,12 @@
                                             </button>
                                         </div>
                                         <input type="hidden" name="cfg_OLLAMA_MODEL" id="cfg-ollama-model" value="{{ cfg.value }}">
+                                        <div class="d-flex align-items-center gap-2 mt-2">
+                                            <button type="button" class="btn btn-sm btn-outline-primary" onclick="pullOllamaModel()">
+                                                <i class="bi bi-download me-1"></i>Pull Model
+                                            </button>
+                                            <span id="pull-status" style="font-size:0.82rem;"></span>
+                                        </div>
                                         <div class="field-description mt-1" id="model-select-hint">
                                             <i class="bi bi-info-circle me-1"></i>คลิก <i class="bi bi-arrow-clockwise"></i> เพื่อโหลด model ที่ติดตั้งจริงจาก Ollama
                                         </div>
@@ -1098,6 +1104,34 @@ async function refreshOllamaModels() {
         }
     } catch (e) {
         hint.innerHTML = `<span class="text-danger">Error: ${e}</span>`;
+    }
+}
+
+// ─── Ollama Pull Model ─────────────────────────────────────────────────
+async function pullOllamaModel() {
+    const model = document.getElementById('cfg-ollama-model').value.trim();
+    const status = document.getElementById('pull-status');
+    if (!model) { status.innerHTML = '<span class="text-warning">เลือก model ก่อน</span>'; return; }
+
+    status.innerHTML = `<span class="text-info"><span class="spinner-border spinner-border-sm me-1"></span>กำลัง pull ${model} (อาจใช้เวลานาน)...</span>`;
+
+    try {
+        const fd = new FormData();
+        fd.append('model', model);
+        const resp = await fetch('/settings/ollama-pull/', {
+            method: 'POST',
+            headers: { 'X-CSRFToken': csrfToken },
+            body: fd,
+        });
+        const data = await resp.json();
+        if (data.ok) {
+            status.innerHTML = `<span class="text-success"><i class="bi bi-check-circle-fill me-1"></i>${data.message}</span>`;
+            refreshOllamaModels();
+        } else {
+            status.innerHTML = `<span class="text-danger"><i class="bi bi-x-circle-fill me-1"></i>${data.message}</span>`;
+        }
+    } catch (e) {
+        status.innerHTML = `<span class="text-danger">Error: ${e}</span>`;
     }
 }
 

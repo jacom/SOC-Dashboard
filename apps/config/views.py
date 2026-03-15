@@ -536,6 +536,42 @@ def ollama_models(request):
 
 
 @login_required
+def ollama_pull(request):
+    """Pull an Ollama model (streams progress, returns final status)."""
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'message': 'POST required'}, status=405)
+
+    import json as _json
+    model = request.POST.get('model', '').strip()
+    if not model:
+        return JsonResponse({'ok': False, 'message': 'model name required'})
+
+    configs = {c.key: c.value for c in IntegrationConfig.objects.filter(key='OLLAMA_URL')}
+    url = configs.get('OLLAMA_URL', '').rstrip('/')
+    if not url:
+        return JsonResponse({'ok': False, 'message': 'OLLAMA_URL not set'})
+
+    try:
+        payload = _json.dumps({'name': model, 'stream': False}).encode()
+        req = urllib.request.Request(
+            f'{url}/api/pull',
+            data=payload,
+            headers={'Content-Type': 'application/json'},
+            method='POST',
+        )
+        with urllib.request.urlopen(req, timeout=600) as resp:
+            data = _json.loads(resp.read())
+            status = data.get('status', '')
+            if 'success' in status.lower() or status == 'success':
+                return JsonResponse({'ok': True, 'message': f'{model} pull สำเร็จ'})
+            return JsonResponse({'ok': True, 'message': f'{model}: {status}'})
+    except urllib.error.URLError as e:
+        return JsonResponse({'ok': False, 'message': f'Cannot connect: {e.reason}'})
+    except Exception as e:
+        return JsonResponse({'ok': False, 'message': str(e)})
+
+
+@login_required
 def ollama_stats(request):
     from apps.alerts.models import Alert, AIAnalysis
     total = Alert.objects.filter(severity__in=['CRITICAL', 'HIGH', 'MEDIUM']).count()
