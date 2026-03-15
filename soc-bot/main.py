@@ -41,6 +41,17 @@ REDIS_URL = os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379/2')
 LAST_POLL_KEY = 'soc:last_poll_time'
 STATS_PROCESSED_KEY = 'soc:stats:total_processed'
 STATS_ERRORS_KEY = 'soc:stats:total_errors'
+BOT_HEARTBEAT_KEY = 'soc:bot:heartbeat'   # TTL=90s, read by Django dashboard
+BOT_HEARTBEAT_TTL = 90
+
+
+def _write_heartbeat():
+    """Write heartbeat to Redis so Django dashboard can detect bot is alive."""
+    try:
+        r = get_redis_client()
+        r.set(BOT_HEARTBEAT_KEY, datetime.now(timezone.utc).isoformat(), ex=BOT_HEARTBEAT_TTL)
+    except Exception:
+        pass
 
 
 def poll_and_process():
@@ -48,6 +59,7 @@ def poll_and_process():
     Main polling job: fetch new Wazuh alerts and process them.
     Called every POLL_INTERVAL seconds by APScheduler.
     """
+    _write_heartbeat()
     logger.debug("--- Poll cycle starting ---")
 
     config = load_config()
@@ -149,9 +161,16 @@ def main():
         trigger=IntervalTrigger(seconds=POLL_INTERVAL),
         id='poll_wazuh',
         name='Poll Wazuh Alerts',
-        max_instances=1,  # Prevent overlapping runs
-        coalesce=True,    # Skip missed runs
+        max_instances=1,
+        coalesce=True,
         misfire_grace_time=30,
+    )
+    scheduler.add_job(
+        _write_heartbeat,
+        trigger=IntervalTrigger(seconds=30),
+        id='heartbeat',
+        name='Redis Heartbeat',
+        max_instances=1,
     )
 
     # Handle graceful shutdown

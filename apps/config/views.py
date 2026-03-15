@@ -166,7 +166,27 @@ def _write_env_file():
 
 
 def _get_bot_status():
-    # Try systemctl first
+    # Primary: read Redis heartbeat written by soc-bot every 30s (TTL=90s)
+    try:
+        import redis as _redis
+        import os as _os
+        _redis_url = _os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379/1')
+        # soc-bot uses db index 2; strip trailing db and use /2
+        _redis_base = _redis_url.rsplit('/', 1)[0]
+        _r = _redis.from_url(
+            f'{_redis_base}/2',  # soc-bot uses db 2
+            socket_connect_timeout=3,
+            socket_timeout=3,
+        )
+        val = _r.get('soc:bot:heartbeat')
+        if val:
+            return {'status': 'active', 'label': 'Running', 'badge': 'success'}
+        # Key exists but expired = bot stopped
+        return {'status': 'inactive', 'label': 'Stopped', 'badge': 'secondary'}
+    except Exception:
+        pass
+
+    # Fallback: systemctl (works when Django runs on host, not in Docker)
     for cmd in (
         ['/usr/bin/systemctl', 'is-active', 'soc-bot'],
         ['/bin/systemctl',     'is-active', 'soc-bot'],
@@ -184,19 +204,6 @@ def _get_bot_status():
                 return {'status': status, 'label': status.title(), 'badge': 'warning'}
         except Exception:
             continue
-
-    # Fallback: check cgroup PID file from systemd
-    try:
-        import pathlib
-        cgroup = pathlib.Path('/sys/fs/cgroup/system.slice/soc-bot.service/cgroup.procs')
-        if not cgroup.exists():
-            cgroup = pathlib.Path('/sys/fs/cgroup/systemd/system.slice/soc-bot.service/tasks')
-        if cgroup.exists():
-            pids = cgroup.read_text().strip().split()
-            if pids:
-                return {'status': 'active', 'label': 'Running', 'badge': 'success'}
-    except Exception:
-        pass
 
     return {'status': 'unknown', 'label': 'Unknown', 'badge': 'secondary'}
 
