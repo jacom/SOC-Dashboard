@@ -303,6 +303,17 @@ fi
 info "Starting Docker Compose stack..."
 docker compose up -d
 
+# ── Allow Docker bridge → host ports (Ollama 11434) ──────────────────────────
+# Docker networks ใช้ 172.16.0.0/12 — ต้องเปิดให้ container เรียก Ollama บน host ได้
+if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
+    ufw allow from 172.16.0.0/12 to any port 11434 comment "Ollama - Docker bridge" >/dev/null 2>&1 && \
+        ok "UFW: allow Docker networks → Ollama port 11434"
+elif command -v firewall-cmd &>/dev/null; then
+    firewall-cmd --permanent --add-rich-rule='rule family="ipv4" source address="172.16.0.0/12" port port="11434" protocol="tcp" accept' >/dev/null 2>&1 && \
+        firewall-cmd --reload >/dev/null 2>&1 && \
+        ok "firewalld: allow Docker networks → Ollama port 11434"
+fi
+
 # ── รอให้ app พร้อม ───────────────────────────────────────────────────────────
 info "รอให้ระบบพร้อม..."
 for i in $(seq 1 30); do
@@ -382,8 +393,17 @@ if [[ "${_OLANS,,}" == "y" ]]; then
         ok "Ollama ติดตั้งเสร็จสิ้น"
     fi
 
+    # ให้ Ollama listen บน 0.0.0.0 (จำเป็นสำหรับ Docker container เข้าถึงได้)
+    mkdir -p /etc/systemd/system/ollama.service.d
+    cat > /etc/systemd/system/ollama.service.d/override.conf <<'OLEOF'
+[Service]
+Environment="OLLAMA_HOST=0.0.0.0:11434"
+OLEOF
+    systemctl daemon-reload
+
     # เปิด service
     systemctl enable --now ollama 2>/dev/null || true
+    ok "Ollama listening on 0.0.0.0:11434"
     warn "pull model ได้ใน Settings → Ollama → Pull Model หรือรัน: ollama pull qwen2.5:7b"
 fi
 

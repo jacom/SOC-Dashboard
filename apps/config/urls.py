@@ -9,6 +9,7 @@ urlpatterns = [
     path('restart-bot/', views.restart_bot, name='restart_bot'),
     path('ollama-models/', views.ollama_models, name='ollama_models'),
     path('ollama-pull/', views.ollama_pull, name='ollama_pull'),
+    path('ollama-pull-status/', views.ollama_pull_status, name='ollama_pull_status'),
     path('ollama-stats/', views.ollama_stats, name='ollama_stats'),
     path('batch-analyze/', views.batch_analyze, name='batch_analyze'),
     path('pipeline-status/', views.pipeline_status, name='pipeline_status'),

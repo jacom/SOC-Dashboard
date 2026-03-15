@@ -1110,11 +1110,10 @@ async function refreshOllamaModels() {
 // ─── Ollama Pull Model ─────────────────────────────────────────────────
 async function pullOllamaModel() {
     const model = document.getElementById('cfg-ollama-model').value.trim();
-    const status = document.getElementById('pull-status');
-    if (!model) { status.innerHTML = '<span class="text-warning">เลือก model ก่อน</span>'; return; }
+    const statusEl = document.getElementById('pull-status');
+    if (!model) { statusEl.innerHTML = '<span class="text-warning">เลือก model ก่อน</span>'; return; }
 
-    status.innerHTML = `<span class="text-info"><span class="spinner-border spinner-border-sm me-1"></span>กำลัง pull ${model} (อาจใช้เวลานาน)...</span>`;
-
+    // Start pull in background thread
     try {
         const fd = new FormData();
         fd.append('model', model);
@@ -1124,15 +1123,35 @@ async function pullOllamaModel() {
             body: fd,
         });
         const data = await resp.json();
-        if (data.ok) {
-            status.innerHTML = `<span class="text-success"><i class="bi bi-check-circle-fill me-1"></i>${data.message}</span>`;
-            refreshOllamaModels();
-        } else {
-            status.innerHTML = `<span class="text-danger"><i class="bi bi-x-circle-fill me-1"></i>${data.message}</span>`;
+        if (!data.ok) {
+            statusEl.innerHTML = `<span class="text-danger"><i class="bi bi-x-circle-fill me-1"></i>${data.message}</span>`;
+            return;
         }
     } catch (e) {
-        status.innerHTML = `<span class="text-danger">Error: ${e}</span>`;
+        statusEl.innerHTML = `<span class="text-danger">Error: ${e}</span>`;
+        return;
     }
+
+    // Poll progress every 2 seconds
+    statusEl.innerHTML = `<span class="text-info"><span class="spinner-border spinner-border-sm me-1"></span>starting...</span>`;
+    const _poll = setInterval(async () => {
+        try {
+            const r = await fetch(`/settings/ollama-pull-status/?model=${encodeURIComponent(model)}`);
+            const d = await r.json();
+            if (!d.ok && d.done) {
+                clearInterval(_poll);
+                statusEl.innerHTML = `<span class="text-danger"><i class="bi bi-x-circle-fill me-1"></i>${d.error || 'error'}</span>`;
+                return;
+            }
+            const pct = d.pct > 0 ? ` ${d.pct}%` : '';
+            statusEl.innerHTML = `<span class="text-info"><span class="spinner-border spinner-border-sm me-1"></span>${d.status}${pct}</span>`;
+            if (d.done) {
+                clearInterval(_poll);
+                statusEl.innerHTML = `<span class="text-success"><i class="bi bi-check-circle-fill me-1"></i>${model} pull สำเร็จ</span>`;
+                refreshOllamaModels();
+            }
+        } catch (e) { /* network blip — keep polling */ }
+    }, 2000);
 }
 
 // ─── Auto-dismiss ──────────────────────────────────────────────────────

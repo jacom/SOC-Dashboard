@@ -1,5 +1,7 @@
 import json
+import os
 import subprocess
+import threading
 import urllib.request
 import urllib.error
 import urllib.parse
@@ -559,13 +561,64 @@ def ollama_models(request):
         return JsonResponse({'ok': False, 'models': [], 'message': str(e)})
 
 
+def _redis_client_db0():
+    """Redis client on DB 0 (soc-bot heartbeat + pull progress)."""
+    import redis as _redis
+    _base = os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379/1').rsplit('/', 1)[0]
+    return _redis.from_url(f'{_base}/0', socket_connect_timeout=3, socket_timeout=5)
+
+
+def _ollama_pull_worker(ollama_url, model, redis_key):
+    """Background thread: pull Ollama model, write progress to Redis."""
+    try:
+        _r = _redis_client_db0()
+    except Exception:
+        return
+
+    def _save(status, pct, done, error=None):
+        try:
+            _r.set(redis_key, json.dumps(
+                {'status': status, 'pct': pct, 'done': done, 'error': error}
+            ), ex=7200)
+        except Exception:
+            pass
+
+    try:
+        payload = json.dumps({'name': model, 'stream': True}).encode()
+        req = urllib.request.Request(
+            f'{ollama_url}/api/pull',
+            data=payload,
+            headers={'Content-Type': 'application/json'},
+            method='POST',
+        )
+        with urllib.request.urlopen(req, timeout=3600) as resp:
+            for raw_line in resp:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    data = json.loads(line)
+                    status = data.get('status', '')
+                    completed = data.get('completed', 0)
+                    total = data.get('total', 0)
+                    pct = int(completed * 100 / total) if total > 0 else 0
+                    done = (status == 'success')
+                    _save(status, pct, done)
+                    if done:
+                        return
+                except Exception:
+                    continue
+        _save('success', 100, True)
+    except Exception as e:
+        _save('error', 0, True, str(e))
+
+
 @login_required
 def ollama_pull(request):
-    """Pull an Ollama model (streams progress, returns final status)."""
+    """Start pulling an Ollama model in a background thread; return immediately."""
     if request.method != 'POST':
         return JsonResponse({'ok': False, 'message': 'POST required'}, status=405)
 
-    import json as _json
     model = request.POST.get('model', '').strip()
     if not model:
         return JsonResponse({'ok': False, 'message': 'model name required'})
@@ -575,24 +628,37 @@ def ollama_pull(request):
     if not url:
         return JsonResponse({'ok': False, 'message': 'OLLAMA_URL not set'})
 
+    redis_key = f'soc:ollama:pull:{model}'
     try:
-        payload = _json.dumps({'name': model, 'stream': False}).encode()
-        req = urllib.request.Request(
-            f'{url}/api/pull',
-            data=payload,
-            headers={'Content-Type': 'application/json'},
-            method='POST',
-        )
-        with urllib.request.urlopen(req, timeout=600) as resp:
-            data = _json.loads(resp.read())
-            status = data.get('status', '')
-            if 'success' in status.lower() or status == 'success':
-                return JsonResponse({'ok': True, 'message': f'{model} pull สำเร็จ'})
-            return JsonResponse({'ok': True, 'message': f'{model}: {status}'})
-    except urllib.error.URLError as e:
-        return JsonResponse({'ok': False, 'message': f'Cannot connect: {e.reason}'})
+        _r = _redis_client_db0()
+        _r.set(redis_key, json.dumps(
+            {'status': 'starting', 'pct': 0, 'done': False, 'error': None}
+        ), ex=7200)
     except Exception as e:
-        return JsonResponse({'ok': False, 'message': str(e)})
+        return JsonResponse({'ok': False, 'message': f'Redis error: {e}'})
+
+    threading.Thread(
+        target=_ollama_pull_worker, args=(url, model, redis_key), daemon=True
+    ).start()
+
+    return JsonResponse({'ok': True, 'message': f'กำลัง pull {model}...'})
+
+
+@login_required
+def ollama_pull_status(request):
+    """Poll pull progress from Redis."""
+    model = request.GET.get('model', '').strip()
+    if not model:
+        return JsonResponse({'ok': False, 'done': True, 'error': 'model required'})
+    redis_key = f'soc:ollama:pull:{model}'
+    try:
+        _r = _redis_client_db0()
+        val = _r.get(redis_key)
+        if val:
+            return JsonResponse({'ok': True, **json.loads(val)})
+        return JsonResponse({'ok': False, 'done': True, 'error': 'ไม่มี pull ที่กำลังทำงาน'})
+    except Exception as e:
+        return JsonResponse({'ok': False, 'done': True, 'error': str(e)})
 
 
 @login_required
